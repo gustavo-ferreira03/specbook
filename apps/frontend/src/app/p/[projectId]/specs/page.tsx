@@ -101,7 +101,9 @@ export default function SpecsDashboard({
         setSyncWarning(result.syncError ?? "");
       })
       .catch((error) => {
-        if (isAbortError(error)) return;
+        if (isAbortError(error)) {
+          return;
+        }
         setLoadError(errorMessage(error));
       });
     return () => controller.abort();
@@ -114,7 +116,9 @@ export default function SpecsDashboard({
     )
   );
   useEffect(() => {
-    if (!pendingRun) return;
+    if (!pendingRun) {
+      return;
+    }
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     async function refreshRuns() {
@@ -124,10 +128,13 @@ export default function SpecsDashboard({
         setSpecs(result.specs);
         setLoadError("");
       } catch (error) {
-        if (!isAbortError(error)) setLoadError(errorMessage(error));
+        if (!isAbortError(error)) {
+          setLoadError(errorMessage(error));
+        }
       } finally {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
           timer = setTimeout(() => void refreshRuns(), 1500);
+        }
       }
     }
     timer = setTimeout(() => void refreshRuns(), 1500);
@@ -140,8 +147,9 @@ export default function SpecsDashboard({
   useEffect(
     () =>
       onInvalidate((event) => {
-        if (matchesInvalidation(event, "tree", projectId))
+        if (matchesInvalidation(event, "tree", projectId)) {
           setRetryKey((key) => key + 1);
+        }
       }),
     [projectId]
   );
@@ -245,12 +253,13 @@ export default function SpecsDashboard({
   const orphans = specs.filter(
     (spec) => !knownFeatureIds.has(spec.featureId) && visible(spec)
   );
-  if (orphans.length > 0)
+  if (orphans.length > 0) {
     groups.push({
       id: "__orphans__",
       title: "Without a feature",
       specs: orphans,
     });
+  }
   const visibleCount = groups.reduce(
     (sum, group) => sum + group.specs.length,
     0
@@ -258,7 +267,9 @@ export default function SpecsDashboard({
 
   function handleRun(selected: SpecSummary[], label: string) {
     const runnable = selected.filter((spec) => spec.status !== "invalid");
-    if (runnable.length === 0) return;
+    if (runnable.length === 0) {
+      return;
+    }
     void runBatch.start(
       label,
       runnable.map((spec) => ({ id: spec.id, title: spec.title })),

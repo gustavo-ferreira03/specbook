@@ -21,20 +21,22 @@ export function analyzeForRun(
   markdown: string
 ): SpecAnalysis {
   const analysis = analyzeSpecSource(testSource);
-  if (!analysis.ok)
+  if (!analysis.ok) {
     throw new CodedError(
       "invalid_spec",
       `Spec "${title}" is invalid: ${analysis.error}`
     );
+  }
   const stepsError = stepTitlesError(
     analysis.analysis.steps,
     parseSpecYaml(markdown).humanSpec
   );
-  if (stepsError)
+  if (stepsError) {
     throw new CodedError(
       "invalid_spec",
       `Spec "${title}" is invalid: ${stepsError}`
     );
+  }
   return analysis.analysis;
 }
 

@@ -74,13 +74,15 @@ function buildFields(
   inputs: CredentialFieldInput[],
   previous?: CredentialField[]
 ): CredentialField[] {
-  if (inputs.length === 0)
+  if (inputs.length === 0) {
     throw new Error("A credential profile needs at least one field.");
+  }
   const seen = new Set<string>();
   return inputs.map((input) => {
     assertValidName("field key", input.key);
-    if (seen.has(input.key))
+    if (seen.has(input.key)) {
       throw new Error(`Duplicate field key "${input.key}".`);
+    }
     seen.add(input.key);
     const kept = previous?.find(
       (field) => field.key === (input.previousKey ?? input.key)
@@ -91,7 +93,9 @@ function buildFields(
     if (input.value !== undefined && (input.value !== "" || !sensitive)) {
       return { key: input.key, value: encryptSecret(input.value), sensitive };
     }
-    if (!kept) throw new Error(`Field "${input.key}" needs a value.`);
+    if (!kept) {
+      throw new Error(`Field "${input.key}" needs a value.`);
+    }
     return { key: input.key, value: kept.value, sensitive };
   });
 }
@@ -108,9 +112,12 @@ async function assertNoEnvCollision(
     throw new Error("Two fields map to the same environment name; rename one.");
   }
   for (const row of await credentialsRepository.listProfiles(projectId)) {
-    if (row.id === ignoreProfileId) continue;
-    if (row.name === profileName)
+    if (row.id === ignoreProfileId) {
+      continue;
+    }
+    if (row.name === profileName) {
       throw new Error(`A profile named "${profileName}" already exists.`);
+    }
     for (const { key } of row.fields) {
       const envName = secretEnvName(row.name, key);
       if (names.has(envName)) {
@@ -240,7 +247,9 @@ export async function resolveSecretEnv(
   missing: string[];
   publicRefs: string[];
 }> {
-  if (refs.length === 0) return { env: {}, missing: [], publicRefs: [] };
+  if (refs.length === 0) {
+    return { env: {}, missing: [], publicRefs: [] };
+  }
   const byEnvName = new Map(
     (await listCredentialValues(projectId)).map((field) => [
       field.envName,
@@ -255,11 +264,12 @@ export async function resolveSecretEnv(
       const envName = secretEnvName(sourceName, field.key);
       byEnvName.delete(envName);
       const targetField = target?.fields.find((item) => item.key === field.key);
-      if (targetField?.value)
+      if (targetField?.value) {
         byEnvName.set(envName, {
           value: decryptSecret(targetField.value),
           sensitive: targetField.sensitive !== false,
         });
+      }
     }
   }
   const env: Record<string, string> = {};
@@ -267,10 +277,13 @@ export async function resolveSecretEnv(
   const publicRefs: string[] = [];
   for (const ref of refs) {
     const field = byEnvName.get(ref);
-    if (!field) missing.push(ref);
-    else {
+    if (!field) {
+      missing.push(ref);
+    } else {
       env[ref] = field.value;
-      if (!field.sensitive) publicRefs.push(ref);
+      if (!field.sensitive) {
+        publicRefs.push(ref);
+      }
     }
   }
   return { env, missing, publicRefs };

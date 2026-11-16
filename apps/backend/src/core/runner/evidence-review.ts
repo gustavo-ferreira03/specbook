@@ -77,13 +77,15 @@ export function provesExpectedResult(
 export function reviewNextStep(
   review: EvidenceReview | null | undefined
 ): string | undefined {
-  if (review?.verdict === "weak")
+  if (review?.verdict === "weak") {
     return `The test does not prove the whole expected result: ${review.reason} ${INSPECT_INSTRUCTION}`;
+  }
   if (
     review?.verdict !== "assertion_wrong" &&
     review?.verdict !== "contradicts"
-  )
+  ) {
     return undefined;
+  }
   return `The test is wrong, not the app. ${INSPECT_INSTRUCTION}`;
 }
 
@@ -99,10 +101,14 @@ export async function reviewRunEvidence(
   const cached = verdictSchema.safeParse(
     JSON.parse(await fs.readFile(cache, "utf8").catch(() => "null"))
   );
-  if (cached.success) return cached.data;
+  if (cached.success) {
+    return cached.data;
+  }
   try {
     const selected = await configuredModel();
-    if (!selected.ready || !selected.model) return null;
+    if (!selected.ready || !selected.model) {
+      return null;
+    }
     const specYaml = await fs.readFile(
       path.join(directory, "spec.yml"),
       "utf8"
@@ -136,11 +142,15 @@ export async function reviewRunEvidence(
     ];
     if ((await getSecuritySettings()).sendScreenshotsToModel) {
       for (const step of shown) {
-        if (!isStepScreenshot(step.file)) continue;
+        if (!isStepScreenshot(step.file)) {
+          continue;
+        }
         const bytes = await fs
           .readFile(path.join(directory, step.file))
           .catch(() => null);
-        if (!bytes || bytes.byteLength > 4 * 1024 * 1024) continue;
+        if (!bytes || bytes.byteLength > 4 * 1024 * 1024) {
+          continue;
+        }
         content.push(
           { type: "text", text: `Screenshot after step "${step.label}":` },
           {

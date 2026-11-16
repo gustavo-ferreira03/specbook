@@ -56,13 +56,15 @@ async function withBatchLock<T>(
 }
 
 function batchOf(item: InboxItem): SpecBatch {
-  if (item.kind !== "spec_batch")
+  if (item.kind !== "spec_batch") {
     throw new Error("This suggestion is not a list of Specs.");
+  }
   const batch = specBatchOf(item);
-  if (!batch?.candidates?.length)
+  if (!batch?.candidates?.length) {
     throw new Error(
       "This list of Specs is incomplete. Request a new suggestion in chat."
     );
+  }
   return batch;
 }
 
@@ -87,10 +89,11 @@ export async function proposeSpecBatch(
 ) {
   const proposed = specBatchProposalSchema.parse(input);
   const chat = await chatsRepository.getChatRow(chatId);
-  if (!chat || chat.projectId !== projectId)
+  if (!chat || chat.projectId !== projectId) {
     throw new Error(
       "This conversation belongs to another project or no longer exists."
     );
+  }
   if (options.contextRevisionId) {
     const context = await projectContextsRepository.getProjectContextRevision(
       options.contextRevisionId
@@ -99,10 +102,11 @@ export async function proposeSpecBatch(
       !context ||
       context.projectId !== projectId ||
       context.status !== "draft"
-    )
+    ) {
       throw new Error(
         "This discovery context can no longer accept suggestions."
       );
+    }
   }
   const features = await featuresRepository.listFeatures(projectId);
   for (const candidate of proposed.candidates) {
@@ -113,8 +117,9 @@ export async function proposeSpecBatch(
       candidate.featureId &&
       !byId &&
       (await featuresRepository.getFeature(candidate.featureId))
-    )
+    ) {
       throw new Error("A suggested feature belongs to another project.");
+    }
     const match =
       byId ??
       features.find(
@@ -122,7 +127,9 @@ export async function proposeSpecBatch(
           feature.title.toLowerCase() === candidate.feature.toLowerCase()
       );
     candidate.featureId = match?.id;
-    if (match) candidate.feature = match.title;
+    if (match) {
+      candidate.feature = match.title;
+    }
   }
   const scrub = createProjectScrubber(projectId);
   const clean = specBatchProposalSchema.parse(
@@ -140,10 +147,13 @@ export async function proposeSpecBatch(
         payloadOf(item).sourceChatId === sourceChatId &&
         JSON.stringify(item.payload.proposed) === JSON.stringify(clean)
     );
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
     let job = existingJob;
-    if (job && job.projectId !== projectId)
+    if (job && job.projectId !== projectId) {
       throw new Error("This conversation belongs to another project.");
+    }
     if (!job) {
       const internalChat = await createChat(projectId);
       job = await jobsRepository.create({
@@ -211,16 +221,19 @@ export async function selectSpecBatch(
 ): Promise<InboxItem> {
   return withBatchLock(item.id, async () => {
     const current = await jobsRepository.item(item.id);
-    if (!current) throw new Error("This suggestion no longer exists.");
+    if (!current) {
+      throw new Error("This suggestion no longer exists.");
+    }
     const batch = batchOf(current);
     if (batch.contextRevisionId) {
       const context = await projectContextsRepository.getProjectContextRevision(
         batch.contextRevisionId
       );
-      if (context?.status !== "confirmed")
+      if (context?.status !== "confirmed") {
         throw new Error(
           "Review and confirm the discovery context before adding these Specs."
         );
+      }
     }
     const selected = new Set(candidateIds);
     if (
@@ -240,13 +253,15 @@ export async function selectSpecBatch(
           (candidate) =>
             Boolean(candidate.selected) !== selected.has(candidate.id)
         )
-      )
+      ) {
         throw new Error("This list has already been selected.");
+      }
       await enqueueSelected(current);
       return current;
     }
-    if (!(await jobsRepository.claimItem(current.id)))
+    if (!(await jobsRepository.claimItem(current.id))) {
       throw new Error("This list has already been reviewed.");
+    }
     const candidates = batch.candidates.map((candidate) =>
       selected.has(candidate.id)
         ? {
@@ -286,7 +301,9 @@ export async function recoverSpecBatches(): Promise<void> {
       "spec_batch",
       ["approved"]
     )) {
-      if (item.kind !== "spec_batch" || item.status !== "approved") continue;
+      if (item.kind !== "spec_batch" || item.status !== "approved") {
+        continue;
+      }
       await enqueueSelected(item).catch((error) =>
         logger.error("could not recover a selected Spec batch", {
           itemId: item.id,
@@ -308,7 +325,9 @@ async function selectedCandidate(job: Job) {
         (candidate) => candidate.selected && candidate.jobId === job.id
       )
     : null;
-  if (item && candidate) return { item, candidate };
+  if (item && candidate) {
+    return { item, candidate };
+  }
   throw new Error("The human has not selected a Spec for this request.");
 }
 
@@ -319,7 +338,9 @@ async function updateCandidate(
 ) {
   await withBatchLock(itemId, async () => {
     const item = await jobsRepository.item(itemId);
-    if (!item) throw new Error("The selected list no longer exists.");
+    if (!item) {
+      throw new Error("The selected list no longer exists.");
+    }
     const batch = batchOf(item);
     await jobsRepository.updateItem(itemId, {
       payload: {
@@ -349,7 +370,7 @@ export async function selectedSpecInstructions(job: Job): Promise<string> {
       feature.title.trim().toLowerCase() ===
       candidate.feature.trim().toLowerCase()
   );
-  if (!feature)
+  if (!feature) {
     feature = await createFeatureInRepo(
       job.projectId,
       null,
@@ -366,6 +387,7 @@ export async function selectedSpecInstructions(job: Job): Promise<string> {
         },
       }
     );
+  }
   await updateCandidate(item.id, candidate.id, {
     resolvedFeatureId: feature.id,
   });
@@ -424,12 +446,15 @@ export async function createSelectedSpec(
   if (
     proposed.title !== candidate.title ||
     proposed.featureId !== candidate.resolvedFeatureId
-  )
+  ) {
     throw new Error(
       "Create only the selected Spec with its assigned title and feature."
     );
+  }
   const validation = validateSpec(proposed.testSource, proposed.humanSpec);
-  if (!validation.ok) throw new Error(validation.error);
+  if (!validation.ok) {
+    throw new Error(validation.error);
+  }
   await options.checkPolicy?.();
   let spec = await specsRepository.getSpec(candidate.specId!);
   let revised = false;
@@ -459,10 +484,11 @@ export async function createSelectedSpec(
         run.status === "passed" && provesExpectedResult(reviews[index])
     );
     if (changed && !passed) {
-      if ((await draftFailures(spec.id)) >= MAX_DRAFT_RUNS)
+      if ((await draftFailures(spec.id)) >= MAX_DRAFT_RUNS) {
         throw new Error(
           `This Spec did not pass after ${MAX_DRAFT_RUNS} runs. Stop revising it and report what failed and what you suspect.`
         );
+      }
       ({ spec } = await updateSpecInRepo(
         spec,
         {
@@ -475,8 +501,9 @@ export async function createSelectedSpec(
       revised = true;
     }
   }
-  if (spec.projectId !== job.projectId)
+  if (spec.projectId !== job.projectId) {
     throw new Error("This selected Spec belongs to another project.");
+  }
   await jobsRepository.update(job.id, { specId: spec.id });
   await options.checkPolicy?.();
   const existing = (await runsRepository.listRuns(spec.id, { limit: 1 }))[0];

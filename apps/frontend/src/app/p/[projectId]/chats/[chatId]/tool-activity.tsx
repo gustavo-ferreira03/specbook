@@ -190,7 +190,9 @@ function fallbackLabel(toolName: string): string {
 
 export function toolCopy(toolName: string): ToolCopy {
   const known = TOOL_COPY[toolName];
-  if (known) return known;
+  if (known) {
+    return known;
+  }
   const label = fallbackLabel(toolName);
   return { done: label, active: `Using ${label.toLowerCase()}`, icon: Wrench };
 }
@@ -209,7 +211,9 @@ export function TurnActivity({
   busy: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  if (steps.length === 0) return null;
+  if (steps.length === 0) {
+    return null;
+  }
   const hidden = expanded ? 0 : Math.max(0, steps.length - VISIBLE_STEPS);
   const visible = steps.slice(hidden);
   return (

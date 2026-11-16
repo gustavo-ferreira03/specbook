@@ -16,12 +16,15 @@ export async function canRunAgentJob(job: Job): Promise<boolean> {
     settingsRepository.getAgentPaused(),
     stewardRepository.get(job.projectId),
   ]);
-  if (globallyPaused || project.paused) return false;
+  if (globallyPaused || project.paused) {
+    return false;
+  }
   if (
     project.autonomy !== "observe" ||
     ["manual", "chat"].includes(job.trigger)
-  )
+  ) {
     return true;
+  }
   const intents = await stewardRepository.intents(job.projectId);
   const linked = intents.find(
     (intent) => intent.jobId === job.id || intent.id === job.id

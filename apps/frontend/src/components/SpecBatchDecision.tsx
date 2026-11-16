@@ -23,21 +23,23 @@ type Candidate = NonNullable<
 >["candidates"][number];
 
 function CandidateStatus({ candidate }: { candidate: Candidate }) {
-  if (candidate.state === "passed")
+  if (candidate.state === "passed") {
     return (
       <Badge variant="success" size="sm">
         <Check size={12} aria-hidden="true" />
         Passed
       </Badge>
     );
-  if (candidate.state === "failed")
+  }
+  if (candidate.state === "failed") {
     return (
       <Badge variant="danger" size="sm">
         <X size={12} aria-hidden="true" />
         First run failed
       </Badge>
     );
-  if (candidate.state === "generating")
+  }
+  if (candidate.state === "generating") {
     return (
       <Badge variant="running" size="sm">
         <LoaderCircle
@@ -48,13 +50,15 @@ function CandidateStatus({ candidate }: { candidate: Candidate }) {
         Creating
       </Badge>
     );
-  if (candidate.state === "needs_answer")
+  }
+  if (candidate.state === "needs_answer") {
     return (
       <Badge variant="warning" size="sm">
         <MessageSquareText size={12} aria-hidden="true" />
         Needs your answer
       </Badge>
     );
+  }
   return (
     <Badge variant="neutral" size="sm">
       <CircleDashed size={12} aria-hidden="true" />
@@ -77,12 +81,13 @@ export function SpecBatchDecision({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const batch = item.payload.specBatch;
-  if (!batch)
+  if (!batch) {
     return (
       <p className="text-body text-ink-muted">
         This list could not load. Refresh Overview to try again.
       </p>
     );
+  }
   const pending = item.status === "pending";
   const selectedCandidates = batch.candidates.filter(
     (candidate) => candidate.selected

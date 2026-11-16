@@ -58,7 +58,9 @@ export function verifyGitAccessToken(
 export async function noteGitAccessTokenUse(projectId: string): Promise<void> {
   const now = Date.now();
   const previous = lastTouched.get(projectId) ?? 0;
-  if (now - previous < TOUCH_INTERVAL_MS) return;
+  if (now - previous < TOUCH_INTERVAL_MS) {
+    return;
+  }
   lastTouched.set(projectId, now);
   await projectsRepository.touchGitAccessToken(
     projectId,

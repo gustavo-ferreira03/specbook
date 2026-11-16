@@ -39,8 +39,9 @@ const { runsRepository } = await import("../../src/infra/repositories/runs");
 const app = new Hono();
 app.use("*", csrfGuard());
 app.onError((err, c) => {
-  if (err instanceof HTTPException)
+  if (err instanceof HTTPException) {
     return c.json({ error: err.message }, err.status);
+  }
   return c.json(
     { error: err instanceof Error ? err.message : String(err) },
     500
@@ -999,7 +1000,9 @@ describe("first-run setup", () => {
       );
       assert.equal(polled.status, 200);
       result = (await polled.json()) as { status: string; url?: string };
-      if (result.status !== "pending") break;
+      if (result.status !== "pending") {
+        break;
+      }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.deepEqual(result, {
@@ -1053,7 +1056,9 @@ describe("first-run setup", () => {
           );
           assert.equal(response.status, 200);
           const result = (await response.json()) as OAuthResult;
-          if (ready(result)) return result;
+          if (ready(result)) {
+            return result;
+          }
           assert.equal(
             result.status,
             "pending",
@@ -1157,8 +1162,9 @@ describe("first-run setup", () => {
         assert.equal(context.messages[0].content, "Reply with OK.");
         assert.equal(options?.maxTokens, 16);
         assert.ok(options?.signal instanceof AbortSignal);
-        if (called === 1)
+        if (called === 1) {
           throw new Error("401 invalid API key sk-never-expose");
+        }
         return { stopReason: "stop" };
       }
     );
@@ -1195,8 +1201,9 @@ describe("first-run setup", () => {
         file: Parameters<typeof fs.access>[0],
         mode: Parameters<typeof fs.access>[1]
       ) => {
-        if (/chrome|chromium|Xvfb|x11vnc/.test(String(file)))
+        if (/chrome|chromium|Xvfb|x11vnc/.test(String(file))) {
           throw new Error("ENOENT /home/server/private");
+        }
         return access(file, mode);
       }
     );
@@ -1250,7 +1257,9 @@ describe("autonomous job proposals", () => {
         if (reads === 1) {
           entered();
           await gate;
-        } else rerun();
+        } else {
+          rerun();
+        }
         return [];
       });
       const draining = drainJobs();
@@ -1437,8 +1446,9 @@ describe("autonomous job proposals", () => {
       ).map((item) => item.id),
       [question.id]
     );
-    for (const job of [first, second])
+    for (const job of [first, second]) {
       await jobsRepository.update(job.id, { status: "cancelled" });
+    }
   });
 
   test("Inbox file previews match the committed bytes for additions and behavior changes", async () => {
@@ -1498,7 +1508,7 @@ describe("autonomous job proposals", () => {
     assert.ok(added.every((file) => file.before === null));
     await applyProposal(proposal);
     const spec = (await specsRepository.listSpecs(projectId))[0]!;
-    for (const file of added)
+    for (const file of added) {
       assert.equal(
         await fs.readFile(
           path.join(repoGit.getRepoDir(projectId), spec.path, file.path),
@@ -1506,6 +1516,7 @@ describe("autonomous job proposals", () => {
         ),
         file.after
       );
+    }
     const yamlFile = path.join(
       repoGit.getRepoDir(projectId),
       spec.path,
@@ -1789,10 +1800,11 @@ describe("autonomous job proposals", () => {
       async navigate(url: string) {
         navigations++;
         assert.equal(url, "https://app.example.com");
-        if (navigateError)
+        if (navigateError) {
           throw new Error(
             "browser tool failed: Browser is already in use for /tmp/profile"
           );
+        }
       },
     } as unknown as import("../../src/core/browser/mcp").BrowserMcp;
     const tool = createSessionTools({
@@ -2129,7 +2141,9 @@ describe("project steward", () => {
       async () => new Response('<script src="/unchanged.js"></script>')
     );
     const projectId = await createProject("Event decisions");
-    for (let i = 0; i < 3; i++) await processProjectSteward(projectId);
+    for (let i = 0; i < 3; i++) {
+      await processProjectSteward(projectId);
+    }
     assert.equal(
       (await stewardRepository.intents(projectId)).length,
       0,
@@ -2439,11 +2453,13 @@ describe("project steward", () => {
           commitSha: run.commitSha,
         });
         await runsRepository.finishRun(passed.id, "passed", 1, null);
-      } else if (state === "changed")
+      } else if (state === "changed") {
         await specsRepository.updateSpecRecord(spec.id, { sourceHash: "new" });
-      else if (state === "current") currentRunId = run.id;
+      } else if (state === "current") {
+        currentRunId = run.id;
+      }
     }
-    for (let i = 0; i < 10; i++)
+    for (let i = 0; i < 10; i++) {
       await stewardRepository.signal({
         projectId,
         key: `old-change:${i}`,
@@ -2456,6 +2472,7 @@ describe("project steward", () => {
           markdownHash: "old",
         },
       });
+    }
     await processProjectSteward(projectId, false);
     assert.equal((await stewardRepository.intents(projectId)).length, 0);
     const router = createStewardRouter();
@@ -2800,8 +2817,9 @@ describe("project steward", () => {
         commitSha: "two",
       },
     });
-    for (const signal of await stewardRepository.signals(projectId))
+    for (const signal of await stewardRepository.signals(projectId)) {
       await stewardRepository.acknowledge(signal.id, "observed");
+    }
     const { resumeCurrentSignals } =
       await import("../../src/core/steward/engine");
     await resumeCurrentSignals(projectId);
@@ -2892,7 +2910,9 @@ describe("project steward", () => {
     assert.equal(question.payload.waitingFor, "credentials");
     assert.equal(question.payload.runIntentId, intent.id);
     assert.equal(question.payload.sourceChatId, chat.id);
-    for (let i = 0; i < 3; i++) await processProjectSteward(projectId, false);
+    for (let i = 0; i < 3; i++) {
+      await processProjectSteward(projectId, false);
+    }
     assert.equal((await jobsRepository.inbox(projectId)).length, 1);
     assert.equal((await stewardRepository.intents(projectId)).length, 1);
     await stewardRepository.signal({
@@ -2921,7 +2941,9 @@ describe("project steward", () => {
     );
     assert.equal(resumed.intent.baseUrl, "https://preview.example.com");
     assert.deepEqual(resumed.intent.specIds, [spec.id]);
-    for (let i = 0; i < 3; i++) await processProjectSteward(projectId, false);
+    for (let i = 0; i < 3; i++) {
+      await processProjectSteward(projectId, false);
+    }
     assert.equal((await jobsRepository.get(resumed.id))?.status, "blocked");
     assert.equal((await jobsRepository.list(projectId)).length, 2);
     assert.equal(
@@ -3265,7 +3287,7 @@ describe("plain-language autonomous presentation", () => {
       "Captured the page"
     );
     await jobsRepository.log(job.id, "proposal:verified", `${item.id}: passed`);
-    for (const key of ["changed:one", "changed:two"])
+    for (const key of ["changed:one", "changed:two"]) {
       await stewardRepository.signal({
         projectId,
         key,
@@ -3274,6 +3296,7 @@ describe("plain-language autonomous presentation", () => {
         body: "Internal detail",
         payload: { specIds: [spec.id] },
       });
+    }
     const view = await projectPresentation(projectId);
     assert.equal(view.activity.length, 1);
     assert.equal(view.activity[0]?.subject.id, spec.id);
@@ -3433,7 +3456,9 @@ describe("plain-language autonomous presentation", () => {
         status === "failed" ? "Result did not appear" : null
       );
       await specsRepository.updateSpecStatus(spec.id, status);
-      if (spec.id === flaky!.id) await runsRepository.markFlaky(run.id, run.id);
+      if (spec.id === flaky!.id) {
+        await runsRepository.markFlaky(run.id, run.id);
+      }
     }
     await specsRepository.updateSpecStatus(
       invalid!.id,
@@ -4132,7 +4157,7 @@ describe("existing checks baseline", () => {
         "Imported",
         ""
       );
-      for (let i = 0; i < 80; i++)
+      for (let i = 0; i < 80; i++) {
         await specsRepository.createSpecRecord({
           projectId,
           featureId: feature.id,
@@ -4146,6 +4171,7 @@ describe("existing checks baseline", () => {
             ? "Missing spec.ts file in the spec directory"
             : null,
         });
+      }
       await processProjectSteward(projectId);
       await processProjectSteward(projectId);
       assert.equal(
@@ -5533,8 +5559,10 @@ describe("accounts, roles and session security", () => {
         const url = new URL(
           input instanceof Request ? input.url : input.toString()
         );
-        if (url.origin !== issuer) return originalFetch(input, options);
-        if (url.pathname === "/.well-known/openid-configuration")
+        if (url.origin !== issuer) {
+          return originalFetch(input, options);
+        }
+        if (url.pathname === "/.well-known/openid-configuration") {
           return Response.json({
             issuer,
             authorization_endpoint: `${issuer}/authorize`,
@@ -5545,7 +5573,8 @@ describe("accounts, roles and session security", () => {
             id_token_signing_alg_values_supported: ["RS256"],
             code_challenge_methods_supported: ["S256"],
           });
-        if (url.pathname === "/jwks")
+        }
+        if (url.pathname === "/jwks") {
           return Response.json({
             keys: [
               {
@@ -5556,6 +5585,7 @@ describe("accounts, roles and session security", () => {
               },
             ],
           });
+        }
         if (url.pathname === "/token") {
           exchanges++;
           const body = new URLSearchParams(options?.body?.toString());
@@ -5933,8 +5963,9 @@ describe("selected batch suggestions", () => {
             false
           );
           if (outcome === "failed") {
-            while ((await read(job.id))?.status === "queued")
+            while ((await read(job.id))?.status === "queued") {
               await executeAttempt();
+            }
             assert.equal((await read(job.id))?.status, "completed");
             assert.equal(
               (await presentSpecBatch((await jobsRepository.item(item.id))!))

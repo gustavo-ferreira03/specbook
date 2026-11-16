@@ -32,25 +32,31 @@ async function failureContent(
   run: Run
 ): Promise<{ sourceHash: string; markdownHash: string } | null> {
   const spec = await specsRepository.getSpec(run.specId);
-  if (!spec || spec.sourceHash !== run.sourceHash) return null;
+  if (!spec || spec.sourceHash !== run.sourceHash) {
+    return null;
+  }
   const markdown = await fs
     .readFile(path.join(runsDir, run.id, "spec.yml"), "utf8")
     .catch(() => null);
-  if (markdown === null || markdownHashOf(markdown) !== spec.markdownHash)
+  if (markdown === null || markdownHashOf(markdown) !== spec.markdownHash) {
     return null;
+  }
   return { sourceHash: run.sourceHash, markdownHash: spec.markdownHash };
 }
 
 export async function processRunFailures(): Promise<void> {
-  if (processing) return;
+  if (processing) {
+    return;
+  }
   processing = true;
   try {
     for (const run of await runsRepository.pendingAutomation()) {
       try {
         if (run.retryOf) {
           const original = await runsRepository.getRun(run.retryOf);
-          if (!original?.automationPending)
+          if (!original?.automationPending) {
             await runsRepository.acknowledgeAutomation(run.id);
+          }
           continue;
         }
         if (run.status === "passed" || run.awaitingDeploy) {
@@ -66,8 +72,12 @@ export async function processRunFailures(): Promise<void> {
         }
         let retry = await runsRepository.retryFor(run.id);
         if (!retry) {
-          if (runnerRetries.has(run.id)) continue;
-          if ((retryDelays.get(run.id)?.retryAt ?? 0) > Date.now()) continue;
+          if (runnerRetries.has(run.id)) {
+            continue;
+          }
+          if ((retryDelays.get(run.id)?.retryAt ?? 0) > Date.now()) {
+            continue;
+          }
           const options = {
             automate: true,
             healOnFailure: false,
@@ -100,12 +110,14 @@ export async function processRunFailures(): Promise<void> {
           }
         }
         retryDelays.delete(run.id);
-        if (retry.status === "running") continue;
+        if (retry.status === "running") {
+          continue;
+        }
         if (retry.status === "passed") {
           await runsRepository.markFlaky(run.id, retry.id);
         } else if (run.healOnFailure && (await failureContent(run))) {
           const spec = await specsRepository.getSpec(run.specId);
-          if (spec)
+          if (spec) {
             await recordFailureSignal(
               spec.projectId,
               retry.id,
@@ -113,6 +125,7 @@ export async function processRunFailures(): Promise<void> {
               spec.title,
               run.id
             );
+          }
         }
         await runsRepository.acknowledgeAutomation(retry.id);
         await runsRepository.acknowledgeAutomation(run.id);

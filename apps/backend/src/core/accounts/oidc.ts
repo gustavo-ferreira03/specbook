@@ -56,8 +56,9 @@ export function validateIssuer(issuer: string): URL {
 
 function configuration(settings: SsoSettings): Promise<oidc.Configuration> {
   const fingerprint = tokenHash(JSON.stringify(settings));
-  if (cached?.fingerprint === fingerprint && cached.expires > Date.now())
+  if (cached?.fingerprint === fingerprint && cached.expires > Date.now()) {
     return cached.configuration;
+  }
   const issuer = validateIssuer(settings.issuer);
   const secret = settings.clientSecret
     ? decryptSecret(settings.clientSecret)
@@ -81,7 +82,9 @@ function configuration(settings: SsoSettings): Promise<oidc.Configuration> {
     expires: Date.now() + 5 * 60_000,
   };
   promise.catch(() => {
-    if (cached?.configuration === promise) cached = null;
+    if (cached?.configuration === promise) {
+      cached = null;
+    }
   });
   return promise;
 }
@@ -96,8 +99,9 @@ export function verifiedEmail(
     /^https:\/\/login\.microsoftonline\.com\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/v2\.0$/i.test(
       issuer
     );
-  if (claims.email_verified !== true && !(entra && claims.xms_edov === true))
+  if (claims.email_verified !== true && !(entra && claims.xms_edov === true)) {
     return null;
+  }
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254
     ? email
     : null;
@@ -105,13 +109,15 @@ export function verifiedEmail(
 
 export async function beginOidc(c: Context, link: boolean): Promise<string> {
   const settings = await accountsRepository.getSso();
-  if (!settings.enabled)
+  if (!settings.enabled) {
     throw new HTTPException(409, { message: "Single sign-on is not enabled." });
+  }
   const user = c.get("user");
-  if (link && !user)
+  if (link && !user) {
     throw new HTTPException(401, {
       message: "Sign in before connecting your account.",
     });
+  }
   const config = await configuration(settings);
   const state = randomToken();
   const browser = randomToken();
@@ -146,24 +152,28 @@ export async function beginOidc(c: Context, link: boolean): Promise<string> {
 export async function finishOidc(c: Context): Promise<string> {
   const state = c.req.query("state");
   const browser = cookieToken(c.req.raw.headers, "specbook_oidc");
-  if (!state || !/^[a-f0-9]{64}$/.test(state) || !browser)
+  if (!state || !/^[a-f0-9]{64}$/.test(state) || !browser) {
     throw new Error("The single sign-on request expired. Start again.");
+  }
   const pending = await accountsRepository.takeOidcState(
     tokenHash(state),
     tokenHash(browser)
   );
   clearCookies(c, "specbook_oidc");
-  if (!pending)
+  if (!pending) {
     throw new Error("The single sign-on request expired. Start again.");
-  if (pending.linkUserId && c.get("authentication") !== "session")
+  }
+  if (pending.linkUserId && c.get("authentication") !== "session") {
     throw new Error("Sign in to the web app before connecting single sign-on.");
+  }
   const settings = await accountsRepository.getSso();
   if (
     !settings.enabled ||
     settings.issuer !== pending.issuer ||
     settings.clientId !== pending.clientId
-  )
+  ) {
     throw new Error("Single sign-on settings changed. Start again.");
+  }
   const config = await configuration(settings);
   const url = new URL(pending.redirectUri);
   url.search = new URL(c.req.url).search;
@@ -174,8 +184,9 @@ export async function finishOidc(c: Context): Promise<string> {
     idTokenExpected: true,
   });
   const claims = tokens.claims();
-  if (!claims?.sub)
+  if (!claims?.sub) {
     throw new Error("The provider did not identify this account.");
+  }
   let profile: Record<string, unknown> = claims;
   if (
     !verifiedEmail(pending.issuer, profile) &&
@@ -235,22 +246,26 @@ export async function finishOidc(c: Context): Promise<string> {
           "Sign in to the matching account before connecting single sign-on."
         );
       }
-      if (!known)
+      if (!known) {
         await accountsRepository.addIdentity(
           active.id,
           pending.issuer,
           claims.sub
         );
+      }
       return verified(active);
     }
     if (known) {
-      if (known.disabledAt) throw new Error("This account is disabled.");
+      if (known.disabledAt) {
+        throw new Error("This account is disabled.");
+      }
       return verified(known);
     }
-    if (await accountsRepository.userByEmail(email))
+    if (await accountsRepository.userByEmail(email)) {
       throw new Error(
         "Sign in to your existing account first, then connect single sign-on from your account menu."
       );
+    }
     const name =
       typeof profile.name === "string"
         ? profile.name

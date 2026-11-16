@@ -50,16 +50,18 @@ declare module "hono" {
 
 async function verifyRunner(c: Context): Promise<true> {
   const runner = await authenticateRunnerToken(c.req.header("authorization"));
-  if (!runner)
+  if (!runner) {
     throw new HTTPException(401, {
       message:
         "Provide a valid runner token. Create one in Settings → Runners.",
     });
-  if (runner.purpose !== "runner")
+  }
+  if (runner.purpose !== "runner") {
     throw new HTTPException(403, {
       message:
         "Use a token created for runner execution to claim or complete Specs.",
     });
+  }
   c.set("runner", runner);
   return true;
 }
@@ -74,28 +76,31 @@ async function verifyMetrics(c: Context): Promise<true> {
     return true;
   }
   const user = await accessTokenFromHeaders(c.req.raw.headers);
-  if (!user || user.role !== "admin")
+  if (!user || user.role !== "admin") {
     throw new HTTPException(401, {
       message:
         "Provide a runner token or an admin access token for runner metrics.",
     });
+  }
   c.set("user", user);
   c.set("authentication", "token");
   return true;
 }
 
 function requireSession(c: Context): void {
-  if (c.get("authentication") !== "session")
+  if (c.get("authentication") !== "session") {
     throw new HTTPException(403, {
       message: "Sign in to the web app to manage runner tokens.",
     });
+  }
 }
 
 const upgradeMessage = `Runner protocol is incompatible with this server (requires ${RUNNER_PROTOCOL_VERSION}). Upgrade the CLI from this server's /cli/specbook.tgz and restart the runner.`;
 
 function requireProtocol(version: number): void {
-  if (version !== RUNNER_PROTOCOL_VERSION)
+  if (version !== RUNNER_PROTOCOL_VERSION) {
     throw new HTTPException(426, { message: upgradeMessage });
+  }
 }
 
 export function createRunnersRouter(): Hono {
@@ -117,10 +122,11 @@ export function createRunnersRouter(): Hono {
       );
       const metrics = queueMetrics(queues);
       c.header("Cache-Control", "no-store");
-      if (format === "prometheus")
+      if (format === "prometheus") {
         return c.body(prometheusQueueMetrics(metrics), 200, {
           "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
         });
+      }
       return c.json(metrics);
     }
   );
@@ -187,8 +193,9 @@ export function createRunnersRouter(): Hono {
   });
   router.delete("/runners/:id", access("admin"), async (c) => {
     requireSession(c);
-    if (!(await revokeRunnerToken(c.req.param("id"))))
+    if (!(await revokeRunnerToken(c.req.param("id")))) {
       throw new HTTPException(404, { message: "Runner not found" });
+    }
     await recordAudit("runner.token.revoked", { id: c.req.param("id") });
     return c.json({ ok: true });
   });
@@ -199,8 +206,9 @@ export function createRunnersRouter(): Hono {
       if (
         !result.success &&
         result.error.issues.some((issue) => issue.path[0] === "protocolVersion")
-      )
+      ) {
         throw new HTTPException(426, { message: upgradeMessage });
+      }
     }),
     async (c) => {
       const runner = c.get("runner");
@@ -237,8 +245,9 @@ export function createRunnersRouter(): Hono {
       if (
         !result.success &&
         result.error.issues.some((issue) => issue.path[0] === "protocolVersion")
-      )
+      ) {
         throw new HTTPException(426, { message: upgradeMessage });
+      }
     }),
     async (c) => {
       const input = c.req.valid("json");

@@ -12,7 +12,9 @@ export function isInside(
   }
 ): boolean {
   const relative = path.relative(parent, child);
-  if (relative === "") return options.allowRoot;
+  if (relative === "") {
+    return options.allowRoot;
+  }
   return (
     !path.isAbsolute(relative) &&
     (options.rejectDotPrefix
@@ -41,7 +43,9 @@ async function assertNoSymlinks(root: string, target: string): Promise<void> {
     try {
       stat = await fs.lstat(current);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
+      }
       throw error;
     }
     if (stat.isSymbolicLink()) {
@@ -75,7 +79,9 @@ export async function readOptionalRepoFile(
   try {
     return await readRepoFile(root, target);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
     throw error;
   }
 }

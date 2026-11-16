@@ -29,8 +29,9 @@ export function proxy(request: NextRequest) {
       name.startsWith("x-forwarded-") ||
       name.startsWith("x-specbook-proxy") ||
       name === "forwarded"
-    )
+    ) {
       headers.delete(name);
+    }
   }
   headers.set("x-specbook-proxy", "1");
   headers.set("x-forwarded-host", host);

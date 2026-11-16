@@ -76,10 +76,11 @@ export function specbookModulePath(): string {
     new URL("./specbook/fixtures.js", import.meta.url),
   ].map((url) => fileURLToPath(url));
   const found = candidates.find((candidate) => existsSync(candidate));
-  if (!found)
+  if (!found) {
     throw new Error(
       "The specbook test module was not found; build @specbook/runtime"
     );
+  }
   return found;
 }
 
@@ -264,16 +265,17 @@ export async function runPlaywrightSuite(
       .catch(() => null);
     const report =
       rawReport === null ? null : scrubJsonText(rawReport, options.scrub);
-    if (report !== null)
+    if (report !== null) {
       await fs.writeFile(path.join(directory, "results.json"), report, "utf8");
+    }
 
-    if (processResult.timedOut)
+    if (processResult.timedOut) {
       processFailure = `Run timed out after ${Math.round(options.timeoutMs / 1000)}s`;
-    else if (report === null)
+    } else if (report === null) {
       processFailure =
         output ||
         `Playwright exited with code ${processResult.code} without a report`;
-    else if (processResult.code !== 0 && processResult.code !== 1) {
+    } else if (processResult.code !== 0 && processResult.code !== 1) {
       processFailure =
         output || `Playwright exited with code ${processResult.code}`;
     }
@@ -288,10 +290,13 @@ export async function runPlaywrightSuite(
     }
     if (parsed && parsed.errors.length > 0 && !processFailure) {
       const missing = options.specs.some((spec) => !parsed.files.has(spec.key));
-      if (missing) processFailure = parsed.errors.join("\n\n");
+      if (missing) {
+        processFailure = parsed.errors.join("\n\n");
+      }
     }
-    if (processFailure)
+    if (processFailure) {
       processFailure = sanitizeTechnicalDetails(options.scrub(processFailure));
+    }
 
     for (const spec of options.specs) {
       const fileResult = parsed?.files.get(spec.key) ?? null;

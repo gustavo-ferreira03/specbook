@@ -28,7 +28,9 @@ function parseDocument(source: string): Record<string, unknown> {
       `Invalid YAML: ${error instanceof Error ? error.message : String(error)}`
     );
   }
-  if (data === null || data === undefined) return {};
+  if (data === null || data === undefined) {
+    return {};
+  }
   if (typeof data !== "object" || Array.isArray(data)) {
     throw new YamlParseError(
       "Invalid YAML: the document must be a mapping of keys to values"
@@ -56,30 +58,44 @@ function optionalString(
   key: string
 ): string | null {
   const value = data[key];
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "string")
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
     throw new YamlParseError(`"${key}" must be a string`);
+  }
   return value.trim() || null;
 }
 
 function stringWithDefault(data: Record<string, unknown>, key: string): string {
   const value = data[key];
-  if (value === undefined || value === null) return "";
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean")
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
+  }
   throw new YamlParseError(`"${key}" must be a string`);
 }
 
 function stringArray(data: Record<string, unknown>, key: string): string[] {
   const value = data[key];
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value))
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
     throw new YamlParseError(`"${key}" must be a list`);
+  }
   return value.map((item, index) => {
-    if (typeof item === "string") return item.trim();
-    if (typeof item === "number" || typeof item === "boolean")
+    if (typeof item === "string") {
+      return item.trim();
+    }
+    if (typeof item === "number" || typeof item === "boolean") {
       return String(item);
+    }
     throw new YamlParseError(`"${key}[${index}]" must be a string`);
   });
 }
@@ -89,9 +105,12 @@ function recordArray(
   key: string
 ): Record<string, unknown>[] {
   const value = data[key];
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value))
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
     throw new YamlParseError(`"${key}" must be a list`);
+  }
   return value.map((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw new YamlParseError(`"${key}[${index}]" must be a mapping`);
@@ -245,7 +264,9 @@ export function parseYamlTitle(source: string): string | null {
 }
 
 function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
   if (value && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, entry]) => entry !== undefined)

@@ -58,22 +58,27 @@ export async function safeWorkspacePath(
     inside === ".." ||
     inside.startsWith(`..${path.sep}`) ||
     path.isAbsolute(inside)
-  )
+  ) {
     throw new Error("Path must be inside .specbook");
+  }
   const rootStat = await fs.lstat(root);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
     throw new Error(".specbook must be a directory, without a symlink");
+  }
   let current = root;
   for (const part of inside.split(path.sep)) {
     current = path.join(current, part);
     const stat = await fs
       .lstat(current)
       .catch((error: NodeJS.ErrnoException) => {
-        if (forWrite && error.code === "ENOENT") return null;
+        if (forWrite && error.code === "ENOENT") {
+          return null;
+        }
         throw error;
       });
-    if (stat?.isSymbolicLink())
+    if (stat?.isSymbolicLink()) {
       throw new Error("Symlinks are not allowed inside .specbook");
+    }
   }
   return target;
 }
@@ -83,10 +88,11 @@ export async function workspaceDirectory(cwd = process.cwd()): Promise<string> {
   try {
     await safeWorkspacePath(directory, "config.yml");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(
         "There is no .specbook workspace here. Run specbook init --base-url <app-url> in your project directory first."
       );
+    }
     throw error;
   }
   return directory;
@@ -106,8 +112,9 @@ export async function loadConfig(workspace: string): Promise<LocalConfig> {
     !["http:", "https:"].includes(url.protocol) ||
     url.username ||
     url.password
-  )
+  ) {
     throw new Error("baseUrl must be an HTTP(S) URL without credentials");
+  }
   return config;
 }
 
@@ -136,8 +143,9 @@ export async function initWorkspace(
     !["http:", "https:"].includes(url.protocol) ||
     url.username ||
     url.password
-  )
+  ) {
     throw new Error("Use an HTTP(S) base URL without credentials");
+  }
   const config = configSchema.parse({ version: 1, baseUrl, agent });
   const workspace = path.join(path.resolve(cwd), ".specbook");
   await fs.mkdir(workspace, { recursive: true });
@@ -145,7 +153,9 @@ export async function initWorkspace(
   await fs
     .writeFile(configFile, stringify(config), { flag: "wx" })
     .catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "EEXIST") throw error;
+      if (error.code !== "EEXIST") {
+        throw error;
+      }
     });
   await fs.mkdir(await safeWorkspacePath(workspace, "specs", true), {
     recursive: true,
@@ -178,18 +188,23 @@ export async function initWorkspace(
       const stat = await fs
         .lstat(current)
         .catch((error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return null;
+          if (error.code === "ENOENT") {
+            return null;
+          }
           throw error;
         });
-      if (stat?.isSymbolicLink())
+      if (stat?.isSymbolicLink()) {
         throw new Error("Cannot install instructions through a symlink");
+      }
     }
     await fs.mkdir(skillDir, { recursive: true });
     const file = path.join(skillDir, "SKILL.md");
     await fs
       .writeFile(file, skill, { flag: "wx" })
       .catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "EEXIST") throw error;
+        if (error.code !== "EEXIST") {
+          throw error;
+        }
       });
   }
   return {
@@ -207,7 +222,9 @@ export function slugify(title: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 100);
-  if (!slug) throw new Error("Use a title containing letters or digits");
+  if (!slug) {
+    throw new Error("Use a title containing letters or digits");
+  }
   return slug;
 }
 
@@ -216,7 +233,9 @@ export async function newSpec(
   title: string,
   feature: string
 ): Promise<unknown> {
-  if (!title.trim()) throw new Error("Spec title is required");
+  if (!title.trim()) {
+    throw new Error("Spec title is required");
+  }
   const featureSlug = slugify(feature);
   const slug = slugify(title);
   const directory = await safeWorkspacePath(
@@ -243,7 +262,9 @@ export async function newSpec(
       { flag: "wx" }
     )
     .catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "EEXIST") throw error;
+      if (error.code !== "EEXIST") {
+        throw error;
+      }
     });
   const yamlFile = await safeWorkspacePath(
     workspace,
@@ -258,8 +279,9 @@ export async function newSpec(
   if (
     (await fs.lstat(yamlFile).catch(() => null)) ||
     (await fs.lstat(testFile).catch(() => null))
-  )
+  ) {
     throw new Error("Spec already exists");
+  }
   await fs.writeFile(
     yamlFile,
     serializeSpecYaml({ title, description: "", humanSpec }),
@@ -281,8 +303,9 @@ export async function specDirectories(
   const directories: string[] = [];
   const visit = async (directory: string, relative: string): Promise<void> => {
     const entries = await fs.readdir(directory, { withFileTypes: true });
-    if (entries.some((entry) => entry.isSymbolicLink()))
+    if (entries.some((entry) => entry.isSymbolicLink())) {
       throw new Error("Symlinks are not allowed inside specs");
+    }
     if (
       entries.some(
         (entry) => entry.name === "spec.yml" || entry.name === "spec.ts"
@@ -291,21 +314,25 @@ export async function specDirectories(
       directories.push(relative);
       return;
     }
-    for (const entry of entries)
+    for (const entry of entries) {
       if (entry.isDirectory())
         await visit(
           path.join(directory, entry.name),
           `${relative}/${entry.name}`
         );
+    }
   };
   await visit(root, "specs");
-  if (!selector) return directories.sort();
+  if (!selector) {
+    return directories.sort();
+  }
   let selected = selector
     .replace(/\\/g, "/")
     .replace(/\/$/, "")
     .replace(/\/(spec\.ts|spec\.yml)$/, "");
-  if (path.isAbsolute(selected))
+  if (path.isAbsolute(selected)) {
     selected = path.relative(workspace, selected).replace(/\\/g, "/");
+  }
   selected = selected.replace(/^\.specbook\//, "").replace(/^\.\//, "");
   const matches = directories.filter(
     (directory) =>
@@ -314,13 +341,16 @@ export async function specDirectories(
       directory.startsWith(`specs/${selected}/`) ||
       path.basename(directory) === selected
   );
-  if (!matches.length) throw new Error("No Specs match the selector");
+  if (!matches.length) {
+    throw new Error("No Specs match the selector");
+  }
   if (
     !selected.includes("/") &&
     matches.length > 1 &&
     !matches.every((item) => item.startsWith(`specs/${selected}/`))
-  )
+  ) {
     throw new Error("Ambiguous Spec slug; use feature/slug");
+  }
   return matches.sort();
 }
 
@@ -338,11 +368,17 @@ export async function readSpec(
     "utf8"
   );
   const analyzed = analyzeSpecSource(source);
-  if (!analyzed.ok) throw new Error(analyzed.error);
+  if (!analyzed.ok) {
+    throw new Error(analyzed.error);
+  }
   const analysis = analyzed.analysis;
   const mismatch = stepTitlesError(analysis.steps, yaml.humanSpec);
-  if (mismatch) throw new Error(mismatch);
-  if (!yaml.title) throw new Error("spec.yml needs a title");
+  if (mismatch) {
+    throw new Error(mismatch);
+  }
+  if (!yaml.title) {
+    throw new Error("spec.yml needs a title");
+  }
   const featurePath = path.posix.dirname(relative);
   const featureSlug = path.posix.basename(featurePath);
   const feature = parseFeatureYaml(

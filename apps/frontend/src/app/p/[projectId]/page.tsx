@@ -212,37 +212,55 @@ function BusyButton({
 }
 
 function RunOutcome({ run }: { run: RecentRun }) {
-  if (run.counts.running > 0)
+  if (run.counts.running > 0) {
     return (
       <LoaderCircle
         size={15}
         className="text-running animate-spin motion-reduce:animate-none"
       />
     );
-  if (run.outcome === "failed" || run.counts.failed > 0)
+  }
+  if (run.outcome === "failed" || run.counts.failed > 0) {
     return <AlertCircle size={15} className="text-danger" />;
-  if (run.outcome === "flaky" || run.counts.flaky > 0)
+  }
+  if (run.outcome === "flaky" || run.counts.flaky > 0) {
     return <RefreshCw size={15} className="text-warning" />;
-  if (run.counts.awaiting_deploy > 0)
+  }
+  if (run.counts.awaiting_deploy > 0) {
     return <Clock3 size={15} className="text-ink-subtle" />;
-  if (run.outcome === "passed")
+  }
+  if (run.outcome === "passed") {
     return <Check size={15} className="text-success" />;
+  }
   return <Check size={15} className="text-ink-subtle" />;
 }
 
 function runCounts(run: RecentRun) {
-  if (run.counts.total <= 1)
+  if (run.counts.total <= 1) {
     return run.counts.awaiting_deploy ? "Waiting for deploy" : "";
+  }
   return `${run.counts.passed} passed · ${run.counts.failed} failed${run.counts.flaky ? ` · ${run.counts.flaky} flaky` : ""}${run.counts.running ? ` · ${run.counts.running} running` : ""}${run.counts.awaiting_deploy ? ` · ${run.counts.awaiting_deploy} waiting for deploy` : ""}`;
 }
 
 function healthStatus(health: OverviewResponse["summary"]["specHealth"]) {
-  if (health.failing > 0) return "failing";
-  if (health.running > 0) return "running";
-  if (health.invalid > 0) return "invalid";
-  if (health.repairing > 0) return "repairing";
-  if (health.flaky > 0) return "flaky";
-  if (health.passing > 0) return "passing";
+  if (health.failing > 0) {
+    return "failing";
+  }
+  if (health.running > 0) {
+    return "running";
+  }
+  if (health.invalid > 0) {
+    return "invalid";
+  }
+  if (health.repairing > 0) {
+    return "repairing";
+  }
+  if (health.flaky > 0) {
+    return "flaky";
+  }
+  if (health.passing > 0) {
+    return "passing";
+  }
   return "not_checked";
 }
 
@@ -466,8 +484,9 @@ function RecentRuns({
 }) {
   const [limit, setLimit] = useState(10);
   const groups = new Map<RecentRun["trigger"], RecentRun[]>();
-  for (const run of runs.slice(0, limit))
+  for (const run of runs.slice(0, limit)) {
     groups.set(run.trigger, [...(groups.get(run.trigger) ?? []), run]);
+  }
   return (
     <OverviewSection id="recent-runs" title="Recently">
       {[...groups].map(([trigger, group]) => (
@@ -519,12 +538,16 @@ export default function HomePage({
     let active = true;
     getProject(projectId)
       .then((result) => {
-        if (active) setProject(result.project);
+        if (active) {
+          setProject(result.project);
+        }
       })
       .catch(() => undefined);
     getProjectContext(projectId)
       .then((result) => {
-        if (active) setNeedsContext(!result.confirmed && !result.draft);
+        if (active) {
+          setNeedsContext(!result.confirmed && !result.draft);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -565,7 +588,9 @@ export default function HomePage({
       } catch {
         return;
       }
-      if (!anchor || anchor === openedAnchor.current || !data) return;
+      if (!anchor || anchor === openedAnchor.current || !data) {
+        return;
+      }
       const item = data.items.find((item) => item.id === anchor);
       const story = stories.find(
         (story) =>
@@ -573,11 +598,15 @@ export default function HomePage({
           story.jobIds.includes(anchor) ||
           story.timeline.some((event) => event.id === anchor)
       );
-      if (item) setSelected({ type: "item", id: item.id });
-      else if (story) setSelected({ type: "story", id: story.id });
-      else if (data.failing.some((entry) => entry.specId === anchor))
+      if (item) {
+        setSelected({ type: "item", id: item.id });
+      } else if (story) {
+        setSelected({ type: "story", id: story.id });
+      } else if (data.failing.some((entry) => entry.specId === anchor)) {
         setSelected({ type: "failure", id: anchor });
-      else return;
+      } else {
+        return;
+      }
       openedAnchor.current = anchor;
     }
     fromHash();
@@ -586,11 +615,12 @@ export default function HomePage({
   }, [data]);
 
   function open(selection: Selection) {
-    if (!selected)
+    if (!selected) {
       returnFocus.current =
         document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null;
+    }
     const anchor = selection.id;
     openedAnchor.current = anchor;
     window.history.replaceState(
@@ -612,7 +642,9 @@ export default function HomePage({
   }
 
   async function togglePause() {
-    if (!data) return;
+    if (!data) {
+      return;
+    }
     const paused = !data.summary.paused;
     setSavingPause(true);
     setFeedback(null);
@@ -812,7 +844,9 @@ export default function HomePage({
       <Sheet
         open={Boolean(selected)}
         onOpenChange={(value) => {
-          if (!value) close();
+          if (!value) {
+            close();
+          }
         }}
       >
         <SheetContent

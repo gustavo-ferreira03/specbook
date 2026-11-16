@@ -91,7 +91,9 @@ wss.on("connection", (websocket, request) => {
 });
 
 server.on("upgrade", (request, socket, head) => {
-  if (request.url?.split("?")[0] === "/runner/tunnel") return;
+  if (request.url?.split("?")[0] === "/runner/tunnel") {
+    return;
+  }
   const headers = new Headers(
     Object.entries(request.headers).flatMap(([key, value]) =>
       typeof value === "string" ? [[key, value]] : []
@@ -113,12 +115,14 @@ server.on("upgrade", (request, socket, head) => {
       }
       wss.handleUpgrade(request, socket, head, (websocket) => {
         const closeUser = (id: string) => {
-          if (id === authenticated.user.id)
+          if (id === authenticated.user.id) {
             websocket.close(1008, "Account permissions changed");
+          }
         };
         const closeSession = (hash: string) => {
-          if (hash === authenticated.session.tokenHash)
+          if (hash === authenticated.session.tokenHash) {
             websocket.close(1008, "Signed out");
+          }
         };
         authEvents.on("user", closeUser);
         authEvents.on("session", closeSession);
@@ -134,12 +138,14 @@ server.on("upgrade", (request, socket, head) => {
         });
         void sessionFromHeaders(headers)
           .then((current) => {
-            if (!current || current.user.role === "viewer")
+            if (!current || current.user.role === "viewer") {
               websocket.close(
                 1008,
                 "Sign in with permission to use the browser"
               );
-            else wss.emit("connection", websocket, request);
+            } else {
+              wss.emit("connection", websocket, request);
+            }
           })
           .catch(() => websocket.close(1011, "Could not verify session"));
       });
@@ -153,7 +159,9 @@ server.on("upgrade", (request, socket, head) => {
 let shuttingDown = false;
 
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
-  if (shuttingDown) return;
+  if (shuttingDown) {
+    return;
+  }
   shuttingDown = true;
   logger.info("shutting down", { signal });
   const timer = setTimeout(() => {
@@ -162,7 +170,9 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   }, 10_000);
   timer.unref();
   const closed = new Promise<void>((resolve) => server.close(() => resolve()));
-  for (const client of wss.clients) client.terminate();
+  for (const client of wss.clients) {
+    client.terminate();
+  }
   closeTunnels();
   wss.close();
   stopFailureMonitor();
@@ -175,7 +185,9 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   await closeAllChatBrowsers().catch((error: unknown) =>
     logger.error("closing browsers failed", { error })
   );
-  if ("closeAllConnections" in server) server.closeAllConnections();
+  if ("closeAllConnections" in server) {
+    server.closeAllConnections();
+  }
   await closed;
   await releaseStorage();
   clearTimeout(timer);

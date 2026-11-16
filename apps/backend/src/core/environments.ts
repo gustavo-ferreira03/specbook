@@ -21,14 +21,16 @@ export function changesPrivateDestination(
   if (
     (previous?.executor ?? "server") !== (next.executor ?? "server") ||
     (previous?.runnerGroup ?? null) !== (next.runnerGroup ?? null)
-  )
+  ) {
     return true;
+  }
   if (
     ![previous?.executor, next.executor].some(
       (executor) => executor === "runner" || executor === "tunnel"
     )
-  )
+  ) {
     return false;
+  }
   return (
     previous?.baseUrl !== next.baseUrl ||
     JSON.stringify([...new Set(previous?.allowedOrigins ?? [])].sort()) !==
@@ -118,15 +120,17 @@ export async function resolveRunEnvironment(
   const row = (await environmentsRepository.list(projectId)).find(
     (environment) => environment.name.toLowerCase() === name.toLowerCase()
   );
-  if (!row)
+  if (!row) {
     throw new NetworkTargetError(
       `Environment "${name}" was not found in this project`
     );
+  }
   const origins = [new URL(row.baseUrl).origin, ...row.allowedOrigins];
-  if (baseUrl && !origins.includes(new URL(baseUrl).origin))
+  if (baseUrl && !origins.includes(new URL(baseUrl).origin)) {
     throw new NetworkTargetError(
       `Add this origin to ${row.name} in Settings → Environments before using it for a preview run`
     );
+  }
   return {
     configuredBaseUrl: row.baseUrl,
     id: row.id,

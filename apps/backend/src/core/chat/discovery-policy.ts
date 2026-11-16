@@ -41,25 +41,29 @@ export function snapshotClickTarget(snapshot: string, target: unknown): string {
     typeof target === "string"
       ? /^(?:aria-ref=)?([a-z]+\d+)$/.exec(target)?.[1]
       : undefined;
-  if (!ref)
+  if (!ref) {
     throw new Error(
       "Click rejected: use an element reference from a fresh browser snapshot, not a selector or description."
     );
+  }
   const lines = snapshot.split("\n");
   const matches = lines
     .map((line, index) => (line.includes(`[ref=${ref}]`) ? index : -1))
     .filter((index) => index >= 0);
-  if (matches.length !== 1)
+  if (matches.length !== 1) {
     throw new Error(
       "Click rejected: the element reference is missing or ambiguous. Take a fresh browser snapshot."
     );
+  }
   const index = matches[0]!;
   let indent = lines[index]!.search(/\S/);
   const labels: string[] = [];
   for (let i = index; i >= 0; i--) {
     const line = lines[i]!;
     const level = line.search(/\S/);
-    if (i !== index && (level < 0 || level >= indent)) continue;
+    if (i !== index && (level < 0 || level >= indent)) {
+      continue;
+    }
     indent = level;
     const element = /^\s*-\s+(\w+)(?:\s+"((?:\\.|[^"\\])*)")?/.exec(line);
     if (
@@ -68,8 +72,9 @@ export function snapshotClickTarget(snapshot: string, target: unknown): string {
         !/^(button|link|menuitem|checkbox|switch|radio|option|tab)$/.test(
           element[1]!
         ))
-    )
+    ) {
       continue;
+    }
     if (element[2]) {
       let name: string;
       try {
@@ -80,10 +85,11 @@ export function snapshotClickTarget(snapshot: string, target: unknown): string {
       labels.push(`${element[1]} ${name}`);
     }
   }
-  if (!labels.length)
+  if (!labels.length) {
     throw new Error(
       "Click rejected: this element has no accessible name to verify. Ask the human how to proceed."
     );
+  }
   return labels.join("; ");
 }
 
@@ -94,7 +100,9 @@ export function chatNavigationOrigins(
   environment: Pick<RunEnvironment, "executor" | "allowedOrigins"> | undefined,
   profiles: { allowedOrigins: string[] }[]
 ): string[] {
-  if (environment?.executor === "tunnel") return environment.allowedOrigins;
+  if (environment?.executor === "tunnel") {
+    return environment.allowedOrigins;
+  }
   return [
     ...new Set([
       new URL(startUrl).origin,
@@ -133,22 +141,25 @@ export function createOriginBrowserPolicy(
             "Navigation rejected: only HTTP and HTTPS URLs without embedded credentials are allowed."
           );
         }
-        if (!origins.has(parsed.origin))
+        if (!origins.has(parsed.origin)) {
           throw new Error(
             `Navigation rejected: ${parsed.origin} is outside the ${scope} origin policy. Add a trusted origin in project Credentials settings if access is required.`
           );
+        }
         return;
       }
       const active = await getActiveTabUrl(mcp, signal);
       if (
         active === "about:blank" &&
         ["browser_snapshot", "browser_tabs"].includes(name)
-      )
+      ) {
         return;
-      if (!active || !withinOrigins(active, origins))
+      }
+      if (!active || !withinOrigins(active, origins)) {
         throw new Error(
           `Navigate to the ${scope} origin before inspecting or interacting with this page.`
         );
+      }
     },
     afterCall: async (_name, _args, _result, signal) => {
       signal?.throwIfAborted();
@@ -156,21 +167,24 @@ export function createOriginBrowserPolicy(
       if (
         active === "about:blank" ||
         (active && withinOrigins(active, origins))
-      )
+      ) {
         return;
-      if (!active)
+      }
+      if (!active) {
         throw new CodedError(
           "infrastructure",
           "The browser could not confirm the current page address. Navigate to the application before continuing."
         );
+      }
       await mcp.client
         .callTool({ name: "browser_navigate_back", arguments: {} }, undefined, {
           signal,
         })
         .catch(() => undefined);
       const afterBack = await getActiveTabUrl(mcp, signal);
-      if (!afterBack || !withinOrigins(afterBack, origins))
+      if (!afterBack || !withinOrigins(afterBack, origins)) {
         await mcp.navigate(startUrl, signal).catch(() => undefined);
+      }
       signal?.throwIfAborted();
       throw new Error(
         `The page left the ${scope} origin policy. Its content was withheld; return to an allowed application address before continuing.`
@@ -195,12 +209,14 @@ export function createDiscoveryBrowserPolicy(
     allowedTools: DISCOVERY_BROWSER_TOOLS,
     beforeCall: async (toolName, args, signal) => {
       await policy.beforeCall?.(toolName, args, signal);
-      if (toolName === "browser_tabs" && args.action === "new")
+      if (toolName === "browser_tabs" && args.action === "new") {
         throw new Error("Opening new tabs is not allowed during discovery.");
-      if (toolName === "browser_type" && args.submit === true)
+      }
+      if (toolName === "browser_type" && args.submit === true) {
         throw new Error(
           "Submitting a form needs a verified button and human authorization. Fill the field without submitting it."
         );
+      }
       if (toolName === "browser_click") {
         const target = snapshotClickTarget(
           await readBrowserSnapshot(mcp, signal),
@@ -213,12 +229,14 @@ export function createDiscoveryBrowserPolicy(
           active &&
           /^button\b/.test(target) &&
           consumeVaultSubmit(mcp, new URL(active).origin)
-        )
+        ) {
           return;
-        if (match)
+        }
+        if (match) {
           throw new Error(
             `Click rejected: the actual ${target} may change application data ("${match[0]}"). Ask the human before proceeding.`
           );
+        }
       }
     },
   };
@@ -242,10 +260,11 @@ export function createAutonomousBrowserPolicy(
   ]);
   return {
     beforeCall: async (name, args, signal) => {
-      if (!allowed.has(name))
+      if (!allowed.has(name)) {
         throw new Error(
           "This browser action needs human authorization. Explain the blocker in the Inbox before proceeding."
         );
+      }
       await policy.beforeCall?.(name, args, signal);
     },
     afterCall: policy.afterCall,

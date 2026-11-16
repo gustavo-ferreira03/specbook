@@ -23,9 +23,13 @@ export function TunnelConnectionNotice({
   const production = tunnels?.find(
     (tunnel) => tunnel.environmentName === "Production"
   );
-  if (!error && (!production || production.connected)) return null;
+  if (!error && (!production || production.connected)) {
+    return null;
+  }
   async function copyCommand() {
-    if (!production) return;
+    if (!production) {
+      return;
+    }
     if (await copyText(production.command)) {
       setCopied(true);
       setCopyError(false);

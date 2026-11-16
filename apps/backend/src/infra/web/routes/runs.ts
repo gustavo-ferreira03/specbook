@@ -33,7 +33,9 @@ function reportHeaders(
   html: string
 ): Record<string, string> {
   const headers = htmlReportHeaders(html);
-  if (c.req.query("download") === undefined) return headers;
+  if (c.req.query("download") === undefined) {
+    return headers;
+  }
   const file = `specbook-${
     name
       .toLowerCase()
@@ -89,9 +91,13 @@ const STORAGE_SHIM = Buffer.from(
 );
 
 function withStorageShim(data: Buffer, type: string): Buffer {
-  if (!type.startsWith("text/html")) return data;
+  if (!type.startsWith("text/html")) {
+    return data;
+  }
   const head = /<head[^>]*>/i.exec(data.toString("latin1"));
-  if (!head) return Buffer.concat([STORAGE_SHIM, data]);
+  if (!head) {
+    return Buffer.concat([STORAGE_SHIM, data]);
+  }
   const at = head.index + head[0].length;
   return Buffer.concat([data.subarray(0, at), STORAGE_SHIM, data.subarray(at)]);
 }
@@ -103,8 +109,9 @@ const batchSchema = z.object({
 });
 
 async function requireRun(runId: string): Promise<void> {
-  if (!(await runsRepository.getRun(runId)))
+  if (!(await runsRepository.getRun(runId))) {
     throw new HTTPException(404, { message: "Run not found" });
+  }
 }
 
 export function createRunsRouter(): Hono {
@@ -113,7 +120,9 @@ export function createRunsRouter(): Hono {
   router.post("/specs/:id/run", access("editor"), async (c) => {
     try {
       const spec = await specsRepository.getSpec(c.req.param("id"));
-      if (!spec) throw new Error("Spec not found");
+      if (!spec) {
+        throw new Error("Spec not found");
+      }
       const environment = await resolveRunEnvironment(
         spec.projectId,
         c.req.query("environment")
@@ -189,8 +198,9 @@ export function createRunsRouter(): Hono {
 
   router.get("/run-batches/:id", access("viewer"), async (c) => {
     const batch = await getRunBatch(c.req.param("id"));
-    if (!batch)
+    if (!batch) {
       throw new HTTPException(404, { message: "Run batch not found" });
+    }
     const { batchQueues, runQueues } = await runnerQueueSnapshot();
     const queue =
       batchQueues.get(batch.id) ??
@@ -214,8 +224,9 @@ export function createRunsRouter(): Hono {
 
   router.get("/run-batches/:id/report", access("viewer"), async (c) => {
     const batch = await getRunBatch(c.req.param("id"));
-    if (!batch)
+    if (!batch) {
       throw new HTTPException(404, { message: "Run batch not found" });
+    }
     const html = await batchReport(batch);
     return c.body(
       html,
@@ -227,8 +238,9 @@ export function createRunsRouter(): Hono {
   router.get("/runs/:id/report", access("viewer"), async (c) => {
     const run = await runsRepository.getRun(c.req.param("id"));
     const spec = run ? await specsRepository.getSpec(run.specId) : null;
-    if (!run || !spec)
+    if (!run || !spec) {
       throw new HTTPException(404, { message: "Run not found" });
+    }
     const html = await runReport(run, spec);
     return c.body(
       html,
@@ -243,7 +255,9 @@ export function createRunsRouter(): Hono {
     zValidator("query", runListSchema),
     async (c) => {
       const spec = await specsRepository.getSpec(c.req.param("id"));
-      if (!spec) throw new HTTPException(404, { message: "Spec not found" });
+      if (!spec) {
+        throw new HTTPException(404, { message: "Spec not found" });
+      }
       const { limit, before } = c.req.valid("query");
       return c.json({
         runs: await visibleRuns(
@@ -255,7 +269,9 @@ export function createRunsRouter(): Hono {
 
   router.get("/runs/:id", access("viewer"), async (c) => {
     const run = await runsRepository.getRun(c.req.param("id"));
-    if (!run) throw new HTTPException(404, { message: "Run not found" });
+    if (!run) {
+      throw new HTTPException(404, { message: "Run not found" });
+    }
     return c.json({ run: (await visibleRuns([run]))[0] });
   });
 
@@ -279,8 +295,9 @@ export function createRunsRouter(): Hono {
     const manifest = directory ? await readEvidenceManifest(directory) : null;
     const recording =
       directory && manifest?.replay ? await readOfflineReplay(directory) : null;
-    if (!recording)
+    if (!recording) {
       throw new HTTPException(404, { message: "Replay not found" });
+    }
     c.header("Cache-Control", "private, no-store");
     c.header("X-Content-Type-Options", "nosniff");
     return c.json(recording);
@@ -290,11 +307,13 @@ export function createRunsRouter(): Hono {
     const runId = c.req.param("id");
     await requireRun(runId);
     const directory = await realRunDirectory(runId);
-    if (!directory)
+    if (!directory) {
       throw new HTTPException(404, { message: "Artifact not found" });
+    }
     const file = c.req.param("file");
-    if (!file || file.includes("\0"))
+    if (!file || file.includes("\0")) {
       throw new HTTPException(400, { message: "Invalid artifact path" });
+    }
     const absolute = path.resolve(directory, file);
     if (
       !isInside(directory, absolute, { allowRoot: true }) ||
@@ -311,11 +330,13 @@ export function createRunsRouter(): Hono {
       }
       throw error;
     }
-    if (!isInside(directory, realArtifact, { allowRoot: true }))
+    if (!isInside(directory, realArtifact, { allowRoot: true })) {
       throw new HTTPException(400, { message: "Invalid artifact path" });
+    }
     const stat = await fs.stat(realArtifact);
-    if (!stat.isFile())
+    if (!stat.isFile()) {
       throw new HTTPException(404, { message: "Artifact not found" });
+    }
     const data = await fs.readFile(realArtifact);
     const type =
       CONTENT_TYPES[path.extname(realArtifact).toLowerCase()] ??

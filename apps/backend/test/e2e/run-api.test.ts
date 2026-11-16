@@ -411,7 +411,9 @@ test("runner cancellation removes pending execution and isolated candidate verif
       const job = (await runnersRepository.pending()).find(
         (row) => row.projectId === project.id
       );
-      if (job) return job;
+      if (job) {
+        return job;
+      }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     throw new Error("Runner work was not queued");
@@ -572,7 +574,9 @@ test("queued runner runs release Spec locks, expire with a reason, and stop afte
     job = (await runnersRepository.pending()).find(
       (row) => row.projectId === project.id
     );
-    if (!job) await new Promise((resolve) => setTimeout(resolve, 10));
+    if (!job) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   }
   assert.ok(job);
   assert.equal(
@@ -709,11 +713,15 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
         pending = (await runnersRepository.pending()).find((row) =>
           row.payload.specs.some((entry) => entry.specId === spec.id)
         );
-        if (!pending) await new Promise((resolve) => setTimeout(resolve, 10));
+        if (!pending) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
       }
       assert.ok(pending);
       batch = (await getRunBatch(pending.batchId))!;
-    } else batch = await startSpecBatch(project.id, [spec.id], corruption);
+    } else {
+      batch = await startSpecBatch(project.id, [spec.id], corruption);
+    }
     const job = (await runnersRepository.pending()).find(
       (row) => row.batchId === batch.id
     )!;
@@ -736,20 +744,25 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
       ]);
     }
     const batchFile = path.join(getRunBatchDirectory(batch.id), "batch.json");
-    if (corruption === "missing batch") await fs.rm(batchFile);
-    if (corruption === "invalid batch")
+    if (corruption === "missing batch") {
+      await fs.rm(batchFile);
+    }
+    if (corruption === "invalid batch") {
       await fs.writeFile(batchFile, "{invalid");
+    }
     if (corruption === "batch directory") {
       await fs.rm(batchFile);
       await fs.mkdir(batchFile);
     }
-    if (corruption === "missing Spec")
+    if (corruption === "missing Spec") {
       await fs.rm(path.join(runsDir, batch.specs[0].runId, "spec.ts"));
+    }
     const original = runsRepository.finishRun;
-    if (corruption === "finish error")
+    if (corruption === "finish error") {
       runsRepository.finishRun = async () => {
         throw new Error("Simulated finish failure");
       };
+    }
     await db
       .update(runnerJobs)
       .set({ queueExpiresAt: new Date(0).toISOString() })
@@ -779,8 +792,9 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
         clearTimeout(timeout);
       }
       await fs.rm(batchFile, { recursive: true, force: true });
-    } else
+    } else {
       assert.equal((await getRunBatch(batch.id))!.status, "error", corruption);
+    }
     if (corruption === "missing Spec") {
       const recovered = (await runsRepository.getRun(batch.specs[0].runId))!;
       assert.equal(
@@ -800,13 +814,14 @@ test("broken runner finalization cannot poison claims, queue notices or metrics"
       );
     }
     await runsRepository.acknowledgeAutomation(batch.specs[0].runId);
-    if (corruption === "finish error")
+    if (corruption === "finish error") {
       await runsRepository.finishRun(
         batch.specs[0].runId,
         "error",
         0,
         "Verification finished"
       );
+    }
   }
   const healthy = await makeSpec("Healthy work");
   const batch = await startSpecBatch(project.id, [healthy.id], "Healthy work");
@@ -990,8 +1005,9 @@ test("tunnel waits release Spec locks and expire with a clear reason", async () 
           (entry) => entry.projectId === project.id
         );
         attempt++
-      )
+      ) {
         await new Promise((resolve) => setTimeout(resolve, 5));
+      }
       assert.equal(areSpecsLocked([spec.id]), false);
       assert.match(
         (await tunnelQueueEntries()).find(
@@ -1027,9 +1043,11 @@ test("tunnel waits release Spec locks and expire with a clear reason", async () 
       await runsRepository.acknowledgeAutomation(run.id);
     }
   } finally {
-    if (previous === undefined)
+    if (previous === undefined) {
       delete process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS;
-    else process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS = previous;
+    } else {
+      process.env.SPECBOOK_TUNNEL_QUEUE_TIMEOUT_SECONDS = previous;
+    }
   }
 });
 
@@ -1233,11 +1251,12 @@ test("historical evidence maps step kinds by title and falls back for unknown la
       failedStep: null,
     })
   );
-  for (const number of [1, 2, 3])
+  for (const number of [1, 2, 3]) {
     await fs.writeFile(
       path.join(directory, "evidence", `step-0${number}.png`),
       "png"
     );
+  }
   const response = await app.request(`/runs/${run.id}/evidence`);
   assert.equal(response.status, 200);
   const evidence = await response.json();
@@ -1511,12 +1530,13 @@ test("an offline runner retry leaves other projects' failure processing availabl
     const project = await projectsRepository.createProject(name, baseUrl);
     await repoGit.ensureProjectRepo(project.id, { create: true });
     const production = (await environmentsRepository.list(project.id))[0]!;
-    if (remote)
+    if (remote) {
       await environmentsRepository.update(production, {
         ...production,
         executor: "runner",
         runnerGroup: "monitor",
       });
+    }
     const environment = await resolveRunEnvironment(project.id);
     const feature = await writer.createFeatureInRepo(
       project.id,
@@ -1588,7 +1608,9 @@ test("an offline runner retry leaves other projects' failure processing availabl
     job = (await runnersRepository.pending()).find(
       (row) => row.projectId === offline.project.id
     );
-    if (job) break;
+    if (job) {
+      break;
+    }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.ok(job);
@@ -2003,19 +2025,21 @@ describe(
             );
         });
         const application = await listen((request, response) => {
-          if (request.url === "/callback")
+          if (request.url === "/callback") {
             return void response
               .writeHead(302, {
                 location: "/",
                 "set-cookie": "session=1; Path=/; HttpOnly",
               })
               .end();
-          if (!request.headers.cookie?.includes("session=1"))
+          }
+          if (!request.headers.cookie?.includes("session=1")) {
             return void response
               .writeHead(302, {
                 location: `${provider.origin}/realms/demo/auth`,
               })
               .end();
+          }
           response
             .writeHead(200, { "content-type": "text/html" })
             .end("<h1>Dashboard</h1>");
@@ -2110,12 +2134,13 @@ test("Single sign-on", async ({ page, step, secret }) => {
       { timeout: 240_000 },
       async () => {
         const slow = http.createServer((request, response) => {
-          if (request.url === "/slow.css")
+          if (request.url === "/slow.css") {
             return void setTimeout(
               () =>
                 response.writeHead(200, { "content-type": "text/css" }).end(""),
               40_000
             );
+          }
           response
             .writeHead(200, { "content-type": "text/html" })
             .end('<h1>Reports</h1><img src="/slow.css" alt="">');
@@ -2435,19 +2460,23 @@ test("Preview credentials", async ({ page, step, secret }) => {
             response.setHeader("Content-Type", "text/html");
             if (request.url === "/credential-receiver") {
               let body = "";
-              for await (const chunk of request) body += chunk;
+              for await (const chunk of request) {
+                body += chunk;
+              }
               received.push(body);
               response.end("Received");
-            } else
+            } else {
               response.end(
                 `<label>Password <input type="password" oninput="fetch('/credential-receiver', { method: 'POST', body: this.value })"></label>`
               );
+            }
           })
         );
-        for (const server of servers)
+        for (const server of servers) {
           await new Promise<void>((resolve) =>
             server.listen(0, "127.0.0.1", resolve)
           );
+        }
         const [stagingUrl, previewUrl] = servers.map(
           (server) =>
             `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -3118,7 +3147,9 @@ describe("scheduled runs", () => {
       let alwaysReject = false;
       const webhook = http.createServer(async (request, response) => {
         let body = "";
-        for await (const chunk of request) body += chunk;
+        for await (const chunk of request) {
+          body += chunk;
+        }
         messages.push(JSON.parse(body));
         response.statusCode = ++calls === 1 || alwaysReject ? 503 : 200;
         response.end();
@@ -3481,10 +3512,11 @@ test("Store", async ({ page, step }) => {
         runsRepository,
         "acknowledgeAutomation",
         async (id: string) => {
-          if (id === original.id)
+          if (id === original.id) {
             throw new Error(
               "Backend stopped before acknowledging the original failure"
             );
+          }
           await acknowledge(id);
         }
       );
@@ -3734,8 +3766,9 @@ describe("autonomous pause and decisions", () => {
         new URL("../../drizzle/0016_colossal_warpath.sql", import.meta.url),
         "utf8"
       );
-      for (const statement of migration.split("--> statement-breakpoint"))
+      for (const statement of migration.split("--> statement-breakpoint")) {
         await client.execute(statement.trim());
+      }
       const migrated = (await client.execute("SELECT * FROM jobs")).rows[0]!;
       assert.equal(migrated.status, "stalled");
       assert.equal(migrated.actions_used, 87);
@@ -4007,7 +4040,9 @@ describe("autonomous pause and decisions", () => {
         "log",
         async (id: string, action: string, detail = "") => {
           await log(id, action, detail);
-          if (id === job.id && action === "stopped") notifyStopped();
+          if (id === job.id && action === "stopped") {
+            notifyStopped();
+          }
         }
       );
       assert.equal(tryReserveChatTurn(chat.id), true);
@@ -4314,8 +4349,11 @@ describe("autonomous pause and decisions", () => {
         "token accounting is audit, not a scheduling or tool limit"
       );
       try {
-        if (scope === "global") await settingsRepository.setAgentPaused(true);
-        else await stewardRepository.update(project.id, { paused: true });
+        if (scope === "global") {
+          await settingsRepository.setAgentPaused(true);
+        } else {
+          await stewardRepository.update(project.id, { paused: true });
+        }
         await assert.rejects(
           () =>
             tool.execute("after-pause", {}, undefined, undefined, {} as never),
@@ -4665,7 +4703,7 @@ describe("autonomous pause and decisions", () => {
             12345,
           ],
         });
-        if (key)
+        if (key) {
           await client.execute({
             sql: "INSERT INTO steward_intents VALUES (?, ?, ?, ?, ?, ?, ?)",
             args: [
@@ -4680,6 +4718,7 @@ describe("autonomous pause and decisions", () => {
               "2026-10-01T00:00:00.000Z",
             ],
           });
+        }
         await client.execute({
           sql: "INSERT INTO inbox_items VALUES (?, ?, 'question', 'pending', ?, ?)",
           args: [
@@ -4709,8 +4748,9 @@ describe("autonomous pause and decisions", () => {
         new URL("../../drizzle/0017_rapid_sunspot.sql", import.meta.url),
         "utf8"
       );
-      for (const statement of migration.split("--> statement-breakpoint"))
+      for (const statement of migration.split("--> statement-breakpoint")) {
         await client.execute(statement.trim());
+      }
       const jobs = (await client.execute("SELECT * FROM jobs")).rows;
       for (const id of ["planner", "coverage", "explore"]) {
         assert.equal(
@@ -5175,8 +5215,9 @@ describe("autonomous pause and decisions", () => {
     const repeated = await post(endpoint);
     assert.equal((await repeated.json()).chatId, chatId);
     const deadline = Date.now() + 5000;
-    while (isChatBusy(chatId) && Date.now() < deadline)
+    while (isChatBusy(chatId) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     assert.equal(isChatBusy(chatId), false);
     assert.deepEqual(
       (await listChats(project.id)).map((chat) => chat.id),

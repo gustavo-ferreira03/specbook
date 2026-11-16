@@ -14,11 +14,12 @@ import { loadProject } from "../load-project";
 
 async function verifyTunnel(c: Context): Promise<true> {
   const runner = await authenticateRunnerToken(c.req.header("authorization"));
-  if (!runner)
+  if (!runner) {
     throw new HTTPException(401, {
       message:
         "Provide a valid runner token. Create one in Settings → Runners.",
     });
+  }
   c.set("runner", runner);
   return true;
 }

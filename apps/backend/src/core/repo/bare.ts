@@ -65,8 +65,9 @@ class RepoBare {
   getBareRepoDir(projectId: string): string {
     const absoluteRoot = path.resolve(bareReposDir);
     const dir = path.resolve(absoluteRoot, `${projectId}.git`);
-    if (path.dirname(dir) !== absoluteRoot)
+    if (path.dirname(dir) !== absoluteRoot) {
       throw new Error("Invalid project bare repo directory");
+    }
     return dir;
   }
 
@@ -99,7 +100,9 @@ class RepoBare {
     try {
       return { checkoutMoved: await this.reconcile(projectId, checkoutDir) };
     } catch (error) {
-      if (!(error instanceof BareStateError)) throw error;
+      if (!(error instanceof BareStateError)) {
+        throw error;
+      }
       console.error(
         `[specbook] canonical repository for ${projectId} needs attention:`,
         error.message
@@ -132,7 +135,9 @@ class RepoBare {
   ): Promise<void> {
     try {
       const project = await projectsRepository.getProject(projectId);
-      if (!project || project.gitExternalSyncError === message) return;
+      if (!project || project.gitExternalSyncError === message) {
+        return;
+      }
       await projectsRepository.setGitExternalSyncError(projectId, message);
     } catch (error) {
       console.error(
@@ -156,12 +161,16 @@ class RepoBare {
     bareSha: string | null;
   }> {
     const checkoutSha = await this.checkoutHead(checkoutDir);
-    if (!checkoutSha)
+    if (!checkoutSha) {
       throw new Error(`Project checkout has no ${MAIN_REF} branch`);
+    }
     const bareSha = await this.getBareHeadSha(projectId);
-    if (!bareSha) return { relation: "no-bare-head", checkoutSha, bareSha };
-    if (bareSha === checkoutSha)
+    if (!bareSha) {
+      return { relation: "no-bare-head", checkoutSha, bareSha };
+    }
+    if (bareSha === checkoutSha) {
       return { relation: "equal", checkoutSha, bareSha };
+    }
     const git = checkoutGit(checkoutDir);
     await git.raw([
       "fetch",
@@ -169,10 +178,12 @@ class RepoBare {
       this.getBareRepoDir(projectId),
       `+${MAIN_REF}:${BARE_TRACKING_REF}`,
     ]);
-    if (await this.isAncestor(git, bareSha, checkoutSha))
+    if (await this.isAncestor(git, bareSha, checkoutSha)) {
       return { relation: "checkout-ahead", checkoutSha, bareSha };
-    if (await this.isAncestor(git, checkoutSha, bareSha))
+    }
+    if (await this.isAncestor(git, checkoutSha, bareSha)) {
       return { relation: "bare-ahead", checkoutSha, bareSha };
+    }
     return { relation: "diverged", checkoutSha, bareSha };
   }
 
@@ -181,8 +192,9 @@ class RepoBare {
     checkoutDir: string
   ): Promise<boolean> {
     const { relation } = await this.compare(projectId, checkoutDir);
-    if (relation === "bare-ahead")
+    if (relation === "bare-ahead") {
       return (await this.fastForwardCheckout(projectId, checkoutDir)).moved;
+    }
     await this.publish(projectId, checkoutDir);
     return false;
   }
@@ -213,7 +225,9 @@ class RepoBare {
       .stat(hookPath)
       .then((stat) => stat.mode & 0o777)
       .catch(() => 0);
-    if (current === content && mode === 0o755) return;
+    if (current === content && mode === 0o755) {
+      return;
+    }
     await fs.mkdir(hooksDir, { recursive: true });
     const tmpPath = `${hookPath}.${process.pid}.${Date.now()}.tmp`;
     try {
@@ -252,8 +266,9 @@ class RepoBare {
         "The project checkout and its canonical repository have diverged; resolve it manually before Git access can continue"
       );
     }
-    if (relation !== "equal")
+    if (relation !== "equal") {
       await this.copyCheckoutIntoBare(projectId, checkoutDir);
+    }
     await this.recordStateError(projectId, null);
   }
 

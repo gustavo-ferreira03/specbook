@@ -85,7 +85,9 @@ class FeaturesRepository {
 
   async getFeatureDeletionSpecIds(id: string): Promise<string[] | null> {
     const target = await this.getFeature(id);
-    if (!target) return null;
+    if (!target) {
+      return null;
+    }
     const featureIds = this.collectFeatureIds(
       id,
       await this.listFeatures(target.projectId)
@@ -116,7 +118,9 @@ class FeaturesRepository {
 
   async deleteFeatureWithRelations(id: string): Promise<DeleteFeatureResult> {
     const target = await this.getFeature(id);
-    if (!target) return { status: "not_found" };
+    if (!target) {
+      return { status: "not_found" };
+    }
     const featureIds = this.collectFeatureIds(
       id,
       await this.listFeatures(target.projectId)
@@ -132,8 +136,9 @@ class FeaturesRepository {
           .from(runs)
           .where(inArray(runs.specId, specIds))
       : [];
-    if (runRows.some((run) => run.status === "running"))
+    if (runRows.some((run) => run.status === "running")) {
       return { status: "busy" };
+    }
     await runBatch([
       ...(specIds.length
         ? [

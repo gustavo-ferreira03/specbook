@@ -99,7 +99,9 @@ function parseSourceLocation(
   reason: string
 ): { line: number; column: number; message: string } | null {
   const match = /^Line (\d+), column (\d+): ([\s\S]*)$/.exec(reason);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
   return {
     line: Number(match[1]),
     column: Number(match[2]),
@@ -124,7 +126,9 @@ async function loadRunEvidence(
     const data = await getRunEvidence(runId, signal);
     return { data, error: "" };
   } catch (error) {
-    if (isAbortError(error)) throw error;
+    if (isAbortError(error)) {
+      throw error;
+    }
     return { data: null, error: errorMessage(error) };
   }
 }
@@ -154,7 +158,9 @@ function FailureReason({
 
 function SourceExcerpt({ source, line }: { source: string; line: number }) {
   const lines = source.split("\n");
-  if (line < 1 || line > lines.length) return null;
+  if (line < 1 || line > lines.length) {
+    return null;
+  }
   const first = Math.max(1, line - 1);
   const last = Math.min(lines.length, line + 1);
   const width = String(last).length;
@@ -199,7 +205,9 @@ function InvalidReason({
   testSource: string | null;
 }) {
   const location = parseSourceLocation(reason);
-  if (!location) return <FailureReason tone="invalid" reason={reason} />;
+  if (!location) {
+    return <FailureReason tone="invalid" reason={reason} />;
+  }
   return (
     <div className="bg-invalid-soft mt-3 rounded-lg px-3 py-2.5">
       <p className="text-meta text-invalid font-mono font-medium">
@@ -312,8 +320,9 @@ function VerificationBanner({
       latestRun?.awaitingDeploy &&
       latestRun.status !== "passed" &&
       latestRun.failReason
-    )
+    ) {
       body = <FailureReason reason={latestRun.failReason} tone="neutral" />;
+    }
   } else if (!latestRun) {
     status = "unverified";
     headline = "Not verified yet";
@@ -407,8 +416,9 @@ function VerificationBanner({
         )}
       </span>
     );
-    if (!passed && latestRun.failReason)
+    if (!passed && latestRun.failReason) {
       body = <FailureReason reason={latestRun.failReason} />;
+    }
   }
 
   const meta = statusMeta(status);
@@ -585,7 +595,9 @@ function EvidenceGallery({
   currentStep: number | null;
   onSelect: (step: RunEvidence["steps"][number]) => void;
 }) {
-  if (evidence.steps.length === 0) return null;
+  if (evidence.steps.length === 0) {
+    return null;
+  }
   return (
     <section
       className="screenshot-section min-w-0"
@@ -664,20 +676,22 @@ function RunEvidencePanel({
     }
   }, []);
   const evidence = loaded?.data;
-  if (run.status === "running")
+  if (run.status === "running") {
     return (
       <p role="status" className="text-body text-ink-muted">
         This run is in progress. Evidence appears when it finishes.
       </p>
     );
-  if (!loaded)
+  }
+  if (!loaded) {
     return (
       <Skeleton
         className="h-24 w-full rounded-lg"
         aria-label="Loading evidence"
       />
     );
-  if (loaded.error)
+  }
+  if (loaded.error) {
     return (
       <Alert variant="danger" role="alert">
         <AlertDescription>
@@ -685,7 +699,10 @@ function RunEvidencePanel({
         </AlertDescription>
       </Alert>
     );
-  if (!evidence) return null;
+  }
+  if (!evidence) {
+    return null;
+  }
   const empty =
     evidence.steps.length === 0 &&
     !evidence.apiSteps?.length &&
@@ -716,7 +733,9 @@ function RunEvidencePanel({
           if (replay.current?.seekToStep(step.number)) {
             setCurrentStep(step.number);
             pendingStep.current = null;
-          } else pendingStep.current = step.number;
+          } else {
+            pendingStep.current = step.number;
+          }
           onSelect({ runId: run.id, step });
         }}
       />
@@ -768,7 +787,9 @@ function RunEntry({
   const queued = run.status === "running" && Boolean(run.queue);
   const meta = statusMeta(waiting || queued ? "awaiting_deploy" : run.status);
   useEffect(() => {
-    if (open && !loaded && run.status !== "running") onExpand(run.id);
+    if (open && !loaded && run.status !== "running") {
+      onExpand(run.id);
+    }
   }, [loaded, onExpand, open, run.id, run.status]);
   const reportUrl = loaded?.data?.reportUrl;
   return (
@@ -793,7 +814,9 @@ function RunEntry({
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
-          if (next && run.status !== "running") onExpand(run.id);
+          if (next && run.status !== "running") {
+            onExpand(run.id);
+          }
         }}
       >
         <div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
@@ -1004,12 +1027,16 @@ export default function SpecPage({
   const evidenceRequestsRef = useRef(new Set<string>());
 
   const ensureEvidence = useCallback((runId: string) => {
-    if (evidenceRequestsRef.current.has(runId)) return;
+    if (evidenceRequestsRef.current.has(runId)) {
+      return;
+    }
     evidenceRequestsRef.current.add(runId);
     void loadRunEvidence(runId)
       .then((loaded) => {
         setEvidence((current) => ({ ...current, [runId]: loaded }));
-        if (loaded.error) evidenceRequestsRef.current.delete(runId);
+        if (loaded.error) {
+          evidenceRequestsRef.current.delete(runId);
+        }
       })
       .catch(() => evidenceRequestsRef.current.delete(runId));
   }, []);
@@ -1019,8 +1046,9 @@ export default function SpecPage({
       evidenceRequestsRef.current = new Set();
       setEvidence({});
       setDetail(nextDetail);
-      if (nextDetail.runs[0] && nextDetail.runs[0].status !== "running")
+      if (nextDetail.runs[0] && nextDetail.runs[0].status !== "running") {
         ensureEvidence(nextDetail.runs[0].id);
+      }
     },
     [ensureEvidence]
   );
@@ -1036,13 +1064,17 @@ export default function SpecPage({
           limit: RUN_HISTORY_LIMIT,
           signal: controller.signal,
         });
-        if (nextDetail.spec.projectId !== projectId)
+        if (nextDetail.spec.projectId !== projectId) {
           throw new Error("This Spec does not belong to this project.");
-        if (controller.signal.aborted) return;
+        }
+        if (controller.signal.aborted) {
+          return;
+        }
         showDetail(nextDetail);
       } catch (error) {
-        if (!controller.signal.aborted && !isAbortError(error))
+        if (!controller.signal.aborted && !isAbortError(error)) {
           setLoadError(errorMessage(error));
+        }
       }
     }
     void load();
@@ -1055,7 +1087,9 @@ export default function SpecPage({
     )
   );
   useEffect(() => {
-    if (!pendingRun) return;
+    if (!pendingRun) {
+      return;
+    }
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     async function refreshRun() {
@@ -1064,15 +1098,19 @@ export default function SpecPage({
           limit: RUN_HISTORY_LIMIT,
           signal: controller.signal,
         });
-        if (nextDetail.spec.projectId !== projectId)
+        if (nextDetail.spec.projectId !== projectId) {
           throw new Error("This Spec does not belong to this project.");
+        }
         setDetail(nextDetail);
         setRunRefreshError("");
       } catch (error) {
-        if (!isAbortError(error)) setRunRefreshError(errorMessage(error));
+        if (!isAbortError(error)) {
+          setRunRefreshError(errorMessage(error));
+        }
       } finally {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
           timer = setTimeout(() => void refreshRun(), 1500);
+        }
       }
     }
     timer = setTimeout(() => void refreshRun(), 1500);
@@ -1085,8 +1123,9 @@ export default function SpecPage({
   async function reloadDetail(): Promise<SpecDetail | null> {
     try {
       const nextDetail = await getSpec(specId, { limit: RUN_HISTORY_LIMIT });
-      if (nextDetail.spec.projectId !== projectId)
+      if (nextDetail.spec.projectId !== projectId) {
         throw new Error("This Spec does not belong to this project.");
+      }
       return nextDetail;
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
@@ -1111,19 +1150,28 @@ export default function SpecPage({
 
   const stepBy = useCallback(
     (delta: number) => {
-      if (!selectedEvidence || selectedIndex < 0) return;
+      if (!selectedEvidence || selectedIndex < 0) {
+        return;
+      }
       const nextStep = selectedSteps[selectedIndex + delta];
-      if (nextStep)
+      if (nextStep) {
         setSelectedEvidence({ runId: selectedEvidence.runId, step: nextStep });
+      }
     },
     [selectedEvidence, selectedIndex, selectedSteps]
   );
 
   useEffect(() => {
-    if (!selectedEvidence) return;
+    if (!selectedEvidence) {
+      return;
+    }
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "ArrowLeft") stepBy(-1);
-      if (event.key === "ArrowRight") stepBy(1);
+      if (event.key === "ArrowLeft") {
+        stepBy(-1);
+      }
+      if (event.key === "ArrowRight") {
+        stepBy(1);
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -1135,7 +1183,9 @@ export default function SpecPage({
     try {
       await runSpec(specId, environment);
       const nextDetail = await reloadDetail();
-      if (nextDetail) showDetail(nextDetail);
+      if (nextDetail) {
+        showDetail(nextDetail);
+      }
     } catch (error) {
       setActionError(errorMessage(error));
     } finally {
@@ -1144,7 +1194,9 @@ export default function SpecPage({
   }
 
   function startEditing() {
-    if (!detail?.content) return;
+    if (!detail?.content) {
+      return;
+    }
     const { humanSpec } = detail.content;
     setTitleDraft(detail.spec.title);
     setDescriptionDraft(detail.spec.description);
@@ -1163,7 +1215,9 @@ export default function SpecPage({
   }
 
   async function saveFiles() {
-    if (!detail?.content) return;
+    if (!detail?.content) {
+      return;
+    }
     setSaving(true);
     setActionError("");
     try {
@@ -1174,10 +1228,12 @@ export default function SpecPage({
           description?: string;
           humanSpec?: typeof current.content.humanSpec;
         } = {};
-        if (titleDraft.trim() !== current.spec.title)
+        if (titleDraft.trim() !== current.spec.title) {
           patch.title = titleDraft.trim();
-        if (descriptionDraft !== current.spec.description)
+        }
+        if (descriptionDraft !== current.spec.description) {
           patch.description = descriptionDraft;
+        }
         const nextHumanSpec = {
           preconditions: splitLines(preconditionsDraft),
           steps: splitLines(stepsDraft),
@@ -1187,10 +1243,12 @@ export default function SpecPage({
         if (
           JSON.stringify(nextHumanSpec) !==
           JSON.stringify(current.content.humanSpec)
-        )
+        ) {
           patch.humanSpec = nextHumanSpec;
-        if (Object.keys(patch).length > 0)
+        }
+        if (Object.keys(patch).length > 0) {
           current = await updateSpec(specId, patch);
+        }
       } else if (rawYamlDraft !== current.content?.yamlSource) {
         current = await updateSpecFiles(specId, { yaml: rawYamlDraft });
       }
@@ -1203,13 +1261,14 @@ export default function SpecPage({
       setEditing(false);
       const nowInvalid = current.spec.status === "invalid";
       setSavedInvalid(nowInvalid);
-      if (nowInvalid)
+      if (nowInvalid) {
         requestAnimationFrame(() =>
           bannerRef.current?.scrollIntoView({
             block: "start",
             behavior: "smooth",
           })
         );
+      }
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1742,7 +1801,9 @@ export default function SpecPage({
       <Dialog
         open={selectedEvidence !== null}
         onOpenChange={(open) => {
-          if (!open) setSelectedEvidence(null);
+          if (!open) {
+            setSelectedEvidence(null);
+          }
         }}
       >
         <DialogContent className="max-h-[calc(100dvh-24px)] max-w-[960px] overflow-y-auto p-4 sm:p-5">

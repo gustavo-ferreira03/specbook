@@ -24,8 +24,9 @@ class RepoGit {
   getRepoDir(projectId: string): string {
     const absoluteRoot = path.resolve(reposDir);
     const dir = path.resolve(absoluteRoot, projectId);
-    if (path.dirname(dir) !== absoluteRoot)
+    if (path.dirname(dir) !== absoluteRoot) {
       throw new Error("Invalid project repo directory");
+    }
     return dir;
   }
 
@@ -56,8 +57,9 @@ class RepoGit {
       await this.hardenCheckoutConfig(projectId);
       return;
     }
-    if (!options.create)
+    if (!options.create) {
       throw new Error(`Git repository is missing for project ${projectId}`);
+    }
     await git.init(["--initial-branch=main"]);
     await git.addConfig("user.name", "specbook");
     await git.addConfig("user.email", "specbook@local");
@@ -66,13 +68,17 @@ class RepoGit {
   }
 
   private async hardenCheckoutConfig(projectId: string): Promise<void> {
-    if (this.hardenedCheckouts.has(projectId)) return;
+    if (this.hardenedCheckouts.has(projectId)) {
+      return;
+    }
     const git = this.getProjectGit(projectId);
     const current = await git
       .raw(["config", "--local", "--get", "core.symlinks"])
       .then((value) => value.trim())
       .catch(() => "");
-    if (current !== "false") await git.addConfig("core.symlinks", "false");
+    if (current !== "false") {
+      await git.addConfig("core.symlinks", "false");
+    }
     this.hardenedCheckouts.add(projectId);
   }
 
@@ -109,12 +115,13 @@ class RepoGit {
         error
       );
     });
-    if (!status.isClean())
+    if (!status.isClean()) {
       await recordAudit(
         "repository.commit",
         { commitSha: head, message },
         projectId
       );
+    }
     return head;
   }
 
@@ -126,19 +133,22 @@ class RepoGit {
           .stat(path.join(gitDir, name))
           .then(() => true)
           .catch((error) => {
-            if ((error as NodeJS.ErrnoException).code === "ENOENT")
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") {
               return false;
+            }
             throw error;
           })
       )
     );
-    if (rebaseInProgress.some(Boolean))
+    if (rebaseInProgress.some(Boolean)) {
       throw new Error("The project repository has an unfinished rebase");
+    }
     const status = await this.getProjectGit(projectId).status();
-    if (!status.isClean())
+    if (!status.isClean()) {
       throw new Error(
         "The project repository has uncommitted changes; sync them first"
       );
+    }
   }
 
   async pinRunCommitUnlocked(
@@ -161,7 +171,9 @@ class RepoGit {
     runIds: string[]
   ): Promise<void> {
     for (const runId of runIds) {
-      if (!/^[0-9a-f-]{36}$/i.test(runId)) continue;
+      if (!/^[0-9a-f-]{36}$/i.test(runId)) {
+        continue;
+      }
       await this.getProjectGit(projectId).raw([
         "update-ref",
         "-d",
@@ -183,8 +195,9 @@ class RepoGit {
         .stat(gitDir)
         .then((stat) => stat.isDirectory())
         .catch(() => false))
-    )
+    ) {
       return;
+    }
     for (const lock of STALE_CHECKOUT_LOCKS) {
       const target = path.join(gitDir, lock);
       if (
@@ -205,8 +218,9 @@ class RepoGit {
           .stat(target)
           .then(() => true)
           .catch(() => false))
-      )
+      ) {
         continue;
+      }
       console.warn(`[specbook] aborting an interrupted rebase in ${projectId}`);
       try {
         await git.rebase(["--abort"]);
@@ -220,8 +234,9 @@ class RepoGit {
           .catch(() => fs.rm(target, { recursive: true, force: true }));
       }
     }
-    if (await repoBare.bareExists(projectId))
+    if (await repoBare.bareExists(projectId)) {
       await repoBare.removeStaleLocks(projectId);
+    }
     await this.hardenCheckoutConfig(projectId);
   }
 

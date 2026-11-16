@@ -207,7 +207,9 @@ function createStreamStore() {
   let frame: number | null = null;
   const listeners = new Set<() => void>();
   const emit = () => {
-    for (const listener of listeners) listener();
+    for (const listener of listeners) {
+      listener();
+    }
   };
   return {
     get: () => text,
@@ -219,7 +221,9 @@ function createStreamStore() {
     },
     append(delta: string) {
       pending += delta;
-      if (frame !== null) return;
+      if (frame !== null) {
+        return;
+      }
       frame = window.requestAnimationFrame(() => {
         frame = null;
         text += pending;
@@ -228,10 +232,14 @@ function createStreamStore() {
       });
     },
     reset() {
-      if (frame !== null) window.cancelAnimationFrame(frame);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
       frame = null;
       pending = "";
-      if (!text) return;
+      if (!text) {
+        return;
+      }
       text = "";
       emit();
     },
@@ -256,15 +264,18 @@ function sameChatState(left: ChatState, right: ChatState): boolean {
   if (
     JSON.stringify(left.contextRevision) !==
     JSON.stringify(right.contextRevision)
-  )
+  ) {
     return false;
+  }
   if (
     JSON.stringify(left.credentialRequest) !==
     JSON.stringify(right.credentialRequest)
-  )
+  ) {
     return false;
-  if (JSON.stringify(left.toolSteps) !== JSON.stringify(right.toolSteps))
+  }
+  if (JSON.stringify(left.toolSteps) !== JSON.stringify(right.toolSteps)) {
     return false;
+  }
   return left.messages.every((message, index) => {
     const next = right.messages[index];
     return (
@@ -289,9 +300,13 @@ function StreamingBubble({
 }) {
   const text = useSyncExternalStore(store.subscribe, store.get, () => "");
   useEffect(() => {
-    if (text) onGrow();
+    if (text) {
+      onGrow();
+    }
   }, [onGrow, text]);
-  if (!text || !busy) return null;
+  if (!text || !busy) {
+    return null;
+  }
   return (
     <article className="mt-3 flex items-start gap-3" aria-hidden="true">
       <AgentAvatar />
@@ -657,9 +672,13 @@ function ChatContent({
       refreshController = controller;
       try {
         const result = await getChat(chatId, controller.signal);
-        if (!active || controller.signal.aborted) return;
+        if (!active || controller.signal.aborted) {
+          return;
+        }
         loaded = true;
-        if (!result.busy) streamStore.reset();
+        if (!result.busy) {
+          streamStore.reset();
+        }
         setState((current) =>
           current && sameChatState(current, result) ? current : result
         );
@@ -672,10 +691,15 @@ function ChatContent({
         setLoadError("");
         setPollError("");
       } catch (error) {
-        if (!active || isAbortError(error)) return;
+        if (!active || isAbortError(error)) {
+          return;
+        }
         const message = errorMessage(error);
-        if (loaded) setPollError(message);
-        else setLoadError(message);
+        if (loaded) {
+          setPollError(message);
+        } else {
+          setLoadError(message);
+        }
       }
     }
 
@@ -706,7 +730,9 @@ function ChatContent({
     };
     const onDelta = (event: Event) => {
       const data = readEvent(event);
-      if (data?.delta) streamStore.append(data.delta);
+      if (data?.delta) {
+        streamStore.append(data.delta);
+      }
     };
     const onMessageStart = (event: Event) => {
       streamAnchorRef.current = readEvent(event)?.afterMessageId ?? null;
@@ -721,14 +747,16 @@ function ChatContent({
         if (
           message.role === "agent" &&
           streamAnchorRef.current === data?.afterMessageId
-        )
+        ) {
           streamStore.reset();
+        }
         setState((current) => {
           if (
             !current ||
             current.messages.some((item) => item.id === message.id)
-          )
+          ) {
             return current;
+          }
           return { ...current, messages: [...current.messages, message] };
         });
       }
@@ -738,7 +766,9 @@ function ChatContent({
       const data = readEvent(event);
       const toolName = data?.toolName;
       const step = data?.step;
-      if (!toolName || !step) return;
+      if (!toolName || !step) {
+        return;
+      }
       setActiveTool(toolName);
       setSteps((current) =>
         current.some((item) => item.id === step.id)
@@ -751,10 +781,14 @@ function ChatContent({
       const data = readEvent(event);
       const stepId = data?.stepId;
       const endedAt = data?.endedAt;
-      if (!stepId || endedAt === undefined) return;
+      if (!stepId || endedAt === undefined) {
+        return;
+      }
       setSteps((current) => {
         const index = current.findIndex((step) => step.id === stepId);
-        if (index === -1) return current;
+        if (index === -1) {
+          return current;
+        }
         const next = current.slice();
         next[index] = { ...next[index], endedAt };
         return next;
@@ -762,23 +796,26 @@ function ChatContent({
     };
     const onAgentStatus = (event: Event) => {
       const data = readEvent(event);
-      if (data?.status === "retrying")
+      if (data?.status === "retrying") {
         setAgentStatus(
           typeof data.message === "string"
             ? data.message
             : "Retrying the response"
         );
-      else if (data?.status === "working")
+      } else if (data?.status === "working") {
         setAgentStatus("Thinking through the request");
-      else setAgentStatus("");
+      } else {
+        setAgentStatus("");
+      }
     };
     const onQueueUpdate = (event: Event) => {
       const data = readEvent(event);
       if (
         typeof data?.steering !== "number" ||
         typeof data.followUp !== "number"
-      )
+      ) {
         return;
+      }
       setState((current) =>
         current
           ? {
@@ -790,7 +827,9 @@ function ChatContent({
     };
 
     function connect() {
-      if (!active) return;
+      if (!active) {
+        return;
+      }
       const source = new EventSource(chatEventsUrl(chatId));
       events = source;
       source.addEventListener("connected", onConnected);
@@ -804,13 +843,19 @@ function ChatContent({
       source.addEventListener("queue_update", onQueueUpdate);
       source.onopen = () => {
         setEventsPaused(false);
-        if (hasOpened) onConnected();
+        if (hasOpened) {
+          onConnected();
+        }
         hasOpened = true;
       };
       source.onerror = () => {
-        if (!active) return;
+        if (!active) {
+          return;
+        }
         setEventsPaused(true);
-        if (source.readyState !== EventSource.CLOSED) return;
+        if (source.readyState !== EventSource.CLOSED) {
+          return;
+        }
         source.close();
         const delay = Math.min(1000 * 2 ** reconnectAttempt, 30_000);
         reconnectAttempt += 1;
@@ -823,7 +868,9 @@ function ChatContent({
     return () => {
       active = false;
       refreshController?.abort();
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
       events?.close();
       streamStore.reset();
     };
@@ -849,7 +896,9 @@ function ChatContent({
   useEffect(
     () =>
       onInvalidate((event) => {
-        if (event.resource && event.resource !== "settings") return;
+        if (event.resource && event.resource !== "settings") {
+          return;
+        }
         getLlmRuntimeStatus()
           .then((status) => setModelReady(status.ready))
           .catch(() => undefined);
@@ -861,16 +910,18 @@ function ChatContent({
     const container = scrollRef.current?.querySelector<HTMLElement>(
       "[data-slot=scroll-area-viewport]"
     );
-    if (container && stickToBottomRef.current)
+    if (container && stickToBottomRef.current) {
       container.scrollTop = container.scrollHeight;
+    }
   }, []);
 
   useEffect(() => {
     const container = scrollRef.current?.querySelector<HTMLElement>(
       "[data-slot=scroll-area-viewport]"
     );
-    if (container && stickToBottomRef.current)
+    if (container && stickToBottomRef.current) {
       container.scrollTop = container.scrollHeight;
+    }
   }, [
     state?.busy,
     state?.messages.length,
@@ -880,11 +931,15 @@ function ChatContent({
   ]);
 
   useEffect(() => {
-    if (!state) return;
+    if (!state) {
+      return;
+    }
     const container = scrollRef.current?.querySelector<HTMLElement>(
       "[data-slot=scroll-area-viewport]"
     );
-    if (!container) return;
+    if (!container) {
+      return;
+    }
     const handleScroll = () => {
       stickToBottomRef.current =
         container.scrollHeight - container.scrollTop - container.clientHeight <
@@ -901,7 +956,9 @@ function ChatContent({
   async function sendMessage(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = text.trim();
-    if (!value || !state || sending) return;
+    if (!value || !state || sending) {
+      return;
+    }
     const followUp = state.busy;
     setSending(true);
     setSendError("");
@@ -909,8 +966,9 @@ function ChatContent({
     setText("");
     stickToBottomRef.current = true;
     try {
-      if (followUp) await queueChatFollowUp(chatId, value);
-      else {
+      if (followUp) {
+        await queueChatFollowUp(chatId, value);
+      } else {
         await sendChatMessage(chatId, value);
         setState((current) => (current ? { ...current, busy: true } : current));
       }
@@ -928,7 +986,9 @@ function ChatContent({
         );
       }
       setPollError("");
-      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
     } catch (error) {
       setSendError(errorMessage(error));
       setText(value);
@@ -938,7 +998,9 @@ function ChatContent({
   }
 
   async function stopAgent() {
-    if (stopping || !state?.busy) return;
+    if (stopping || !state?.busy) {
+      return;
+    }
     setStopping(true);
     setActionError("");
     try {
@@ -977,7 +1039,9 @@ function ChatContent({
   async function editMessage(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = editingText.trim();
-    if (!editingMessageId || !value || state?.busy || actionMessageId) return;
+    if (!editingMessageId || !value || state?.busy || actionMessageId) {
+      return;
+    }
     setActionMessageId(editingMessageId);
     setActionError("");
     try {
@@ -994,7 +1058,9 @@ function ChatContent({
   }
 
   async function retryMessage(messageId: string) {
-    if (state?.busy || actionMessageId) return;
+    if (state?.busy || actionMessageId) {
+      return;
+    }
     setActionMessageId(messageId);
     setActionError("");
     try {
@@ -1037,7 +1103,9 @@ function ChatContent({
     const merged = new Map(
       (state?.toolSteps ?? []).map((step) => [step.id, step])
     );
-    for (const step of steps) merged.set(step.id, step);
+    for (const step of steps) {
+      merged.set(step.id, step);
+    }
     return [...merged.values()];
   }, [state?.toolSteps, steps]);
 
@@ -1049,8 +1117,9 @@ function ChatContent({
     );
   });
   const discussResult = useStableCallback(async (message: string) => {
-    if (sending || !state)
+    if (sending || !state) {
       throw new Error("Wait for the current message to be sent.");
+    }
     setSending(true);
     try {
       if (state.busy) {
@@ -1081,7 +1150,9 @@ function ChatContent({
   );
   const scrollToResult = useCallback((id: string) => {
     const element = document.getElementById(id);
-    if (!element) return;
+    if (!element) {
+      return;
+    }
     stickToBottomRef.current = false;
     element.scrollIntoView({ block: "center" });
     const target = element.querySelector<HTMLElement>(
@@ -1101,7 +1172,9 @@ function ChatContent({
   const resultGroups = useMemo(() => {
     const nodes = new Map<string | null, ReactNode>();
     const data = chatResults.data;
-    if (!data || !state) return nodes;
+    if (!data || !state) {
+      return nodes;
+    }
     const messages = new Set(state.messages.map((message) => message.id));
     const fallback = state.messages.at(-1)?.id ?? null;
     const groups = new Map<string | null, ChatResults>();
@@ -1125,21 +1198,32 @@ function ChatContent({
       }
       return value;
     }
-    for (const item of data.items) group(item.afterMessageId).items.push(item);
-    for (const task of data.tasks) group(task.afterMessageId).tasks.push(task);
-    for (const note of data.notes) group(note.afterMessageId).notes.push(note);
-    for (const run of data.runs) group(run.afterMessageId).runs.push(run);
-    for (const spec of data.specs) group(spec.afterMessageId).specs.push(spec);
-    for (const request of data.credentialRequests)
+    for (const item of data.items) {
+      group(item.afterMessageId).items.push(item);
+    }
+    for (const task of data.tasks) {
+      group(task.afterMessageId).tasks.push(task);
+    }
+    for (const note of data.notes) {
+      group(note.afterMessageId).notes.push(note);
+    }
+    for (const run of data.runs) {
+      group(run.afterMessageId).runs.push(run);
+    }
+    for (const spec of data.specs) {
+      group(spec.afterMessageId).specs.push(spec);
+    }
+    for (const request of data.credentialRequests) {
       if (request.chatId !== chatId)
         group(request.afterMessageId).credentialRequests.push(request);
+    }
     if (data.contextRevision) {
       const anchor = visibleSteps.findLast(
         (step) => step.toolName === "propose_project_context"
       )?.afterMessageId;
       group(anchor).contextRevision = data.contextRevision;
     }
-    for (const [anchor, value] of groups)
+    for (const [anchor, value] of groups) {
       nodes.set(
         anchor,
         <article
@@ -1166,6 +1250,7 @@ function ChatContent({
           </div>
         </article>
       );
+    }
     return nodes;
   }, [
     answerQuestion,
@@ -1187,7 +1272,9 @@ function ChatContent({
 
   useEffect(() => {
     const textarea = textareaRef.current;
-    if (!textarea) return;
+    if (!textarea) {
+      return;
+    }
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
   }, [text, state !== null]);

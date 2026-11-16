@@ -41,7 +41,9 @@ const records = [];
 fs.readFileSync(inputPath, "utf8")
   .split("\n")
   .forEach((line, index) => {
-    if (!line.trim()) return;
+    if (!line.trim()) {
+      return;
+    }
     try {
       records.push(JSON.parse(line));
     } catch {
@@ -50,7 +52,9 @@ fs.readFileSync(inputPath, "utf8")
   });
 
 function csvCell(value) {
-  if (value === null || value === undefined) return "";
+  if (value === null || value === undefined) {
+    return "";
+  }
   const text =
     typeof value === "object" ? JSON.stringify(value) : String(value);
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -177,5 +181,8 @@ const csv =
     ...rows.map((row) => columns.map(([, get]) => csvCell(get(row))).join(",")),
   ].join("\n") + "\n";
 
-if (outPath) fs.writeFileSync(outPath, csv, "utf8");
-else process.stdout.write(csv);
+if (outPath) {
+  fs.writeFileSync(outPath, csv, "utf8");
+} else {
+  process.stdout.write(csv);
+}

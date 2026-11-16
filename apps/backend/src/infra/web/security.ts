@@ -89,8 +89,9 @@ export function hostGuard(allowlist: HostAllowlist): MiddlewareHandler {
       isGitHttpPath(pathname) ||
       pathname.startsWith("/ci/") ||
       pathname.startsWith("/runner/")
-    )
+    ) {
       return next();
+    }
     const host = c.req.header("host");
     if (!isAllowedHost(allowlist, host)) {
       logger.warn("rejected request with unexpected Host header", {
@@ -113,8 +114,9 @@ export function csrfGuard(): MiddlewareHandler {
       isGitHttpPath(c.req.path) ||
       c.req.path.startsWith("/ci/") ||
       /^Bearer /i.test(c.req.header("authorization") ?? "")
-    )
+    ) {
       return next();
+    }
     if (c.req.header(REQUEST_HEADER) !== "1") {
       return c.json({ error: `Missing ${REQUEST_HEADER} header` }, 403);
     }
@@ -153,8 +155,12 @@ export function requestLogger(): MiddlewareHandler {
       status,
       durationMs: Math.round(performance.now() - started),
     };
-    if (status >= 500) logger.error("request", fields);
-    else if (c.req.path === "/health") logger.debug("request", fields);
-    else logger.info("request", fields);
+    if (status >= 500) {
+      logger.error("request", fields);
+    } else if (c.req.path === "/health") {
+      logger.debug("request", fields);
+    } else {
+      logger.info("request", fields);
+    }
   };
 }

@@ -26,7 +26,11 @@ for (const cli of clis) {
     const result = spawnSync(process.execPath, [cli, ...args], {
       stdio: "inherit",
     });
-    if (result.error) throw result.error;
-    if (result.status !== 0) process.exit(result.status ?? 1);
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      process.exit(result.status ?? 1);
+    }
   }
 }

@@ -16,7 +16,9 @@ export function uniqueSlug(
   id: string
 ): string {
   const base = slugify(title);
-  if (!taken.has(base)) return base;
+  if (!taken.has(base)) {
+    return base;
+  }
   return `${base}-${id.slice(0, 6)}`;
 }
 

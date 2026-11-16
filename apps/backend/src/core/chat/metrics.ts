@@ -99,19 +99,26 @@ function previousRunSpecCalls(sessionManager: SessionManager | null): {
 } {
   const bySpec = new Map<string, number>();
   let total = 0;
-  if (!sessionManager) return { total, bySpec };
+  if (!sessionManager) {
+    return { total, bySpec };
+  }
   for (const entry of sessionManager.getEntries()) {
-    if (entry.type !== "message" || entry.message.role !== "assistant")
+    if (entry.type !== "message" || entry.message.role !== "assistant") {
       continue;
+    }
     const content = (entry.message as { content?: unknown }).content;
-    if (!Array.isArray(content)) continue;
+    if (!Array.isArray(content)) {
+      continue;
+    }
     for (const part of content) {
       const call = part as {
         type?: string;
         name?: string;
         arguments?: { specId?: unknown };
       };
-      if (call?.type !== "toolCall" || call.name !== "run_spec") continue;
+      if (call?.type !== "toolCall" || call.name !== "run_spec") {
+        continue;
+      }
       total += 1;
       const specId =
         typeof call.arguments?.specId === "string" ? call.arguments.specId : "";
@@ -177,7 +184,9 @@ export class TurnMetricsRecorder {
     outcome: Exclude<TurnOutcome, "completed">,
     errorKind: string | null = null
   ): void {
-    if (this.record.outcome !== "completed") return;
+    if (this.record.outcome !== "completed") {
+      return;
+    }
     this.record.outcome = outcome;
     this.record.errorKind = errorKind;
   }
@@ -188,7 +197,9 @@ export class TurnMetricsRecorder {
   }
 
   toolEnd(toolName: string, isError: boolean): void {
-    if (!isError) return;
+    if (!isError) {
+      return;
+    }
     this.record.toolErrorCount += 1;
     increment(this.record.toolErrors, toolName);
   }
@@ -220,7 +231,9 @@ export class TurnMetricsRecorder {
   }): void {
     this.record.assistantMessages += 1;
     const usage = message.usage;
-    if (!usage) return;
+    if (!usage) {
+      return;
+    }
     const { tokens, cost } = this.record;
     tokens.input += num(usage.input);
     tokens.output += num(usage.output);
@@ -256,7 +269,9 @@ export class TurnMetricsRecorder {
   }
 
   async finish(): Promise<void> {
-    if (this.finished) return;
+    if (this.finished) {
+      return;
+    }
     this.finished = true;
     try {
       const ended = Date.now();

@@ -40,8 +40,9 @@ export async function runLocal(
 ): Promise<LocalRun> {
   const config = await loadConfig(workspace);
   const specs = await listSpecs(workspace, selector);
-  if (!specs.length)
+  if (!specs.length) {
     throw new Error("No Specs found; use specbook spec new or specbook chat");
+  }
   const policy = await localNetworkPolicy(config.baseUrl);
   const secrets = await resolveRunSecrets(
     specs.flatMap((spec) => spec.analysis.secretRefs),

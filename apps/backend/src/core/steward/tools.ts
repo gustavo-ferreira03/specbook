@@ -25,14 +25,16 @@ async function validateReferences(
 ): Promise<void> {
   for (const specId of intent.specIds ?? []) {
     const spec = await specsRepository.getSpec(specId);
-    if (!spec || spec.projectId !== projectId)
+    if (!spec || spec.projectId !== projectId) {
       throw new Error("Every selected Spec must belong to this project");
+    }
   }
   if (intent.runId) {
     const run = await runsRepository.getRun(intent.runId);
     const spec = run ? await specsRepository.getSpec(run.specId) : null;
-    if (!run || !spec || spec.projectId !== projectId)
+    if (!run || !spec || spec.projectId !== projectId) {
       throw new Error("The referenced run must belong to this project");
+    }
     if (
       intent.kind === "triage" &&
       run.status !== "failed" &&

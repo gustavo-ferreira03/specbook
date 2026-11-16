@@ -49,8 +49,9 @@ async function version(): Promise<string> {
   if (
     typeof manifest.version !== "string" ||
     !/^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(manifest.version)
-  )
+  ) {
     throw new Error("The CLI package has an invalid version");
+  }
   return manifest.version;
 }
 
@@ -68,7 +69,9 @@ async function response(url: string, signal?: AbortSignal): Promise<Response> {
       : AbortSignal.timeout(120_000);
     fetched = await fetch(url, { signal: requestSignal });
   } catch (error) {
-    if (signal?.aborted) throw signal.reason;
+    if (signal?.aborted) {
+      throw signal.reason;
+    }
     throw new Error("The UI release could not be downloaded");
   }
   if (!fetched.ok) {
@@ -88,10 +91,11 @@ async function downloadUi(
   url: string,
   signal?: AbortSignal
 ): Promise<void> {
-  if (!/^[a-f0-9]{64}$/.test(expectedUiSha256))
+  if (!/^[a-f0-9]{64}$/.test(expectedUiSha256)) {
     throw new Error(
       "This CLI build has no trusted UI release checksum; use a release CLI or provide an extracted UI with --ui"
     );
+  }
   const parent = path.dirname(target);
   await fs.mkdir(parent, { recursive: true, mode: 0o700 });
   const temporary = await fs.mkdtemp(
@@ -100,7 +104,9 @@ async function downloadUi(
   try {
     const archive = path.join(temporary, "ui.tar.gz");
     const downloaded = await response(url, signal);
-    if (!downloaded.body) throw new Error("The UI release archive is empty");
+    if (!downloaded.body) {
+      throw new Error("The UI release archive is empty");
+    }
     const hash = createHash("sha256");
     let bytes = 0;
     const measured = new Transform({
@@ -122,8 +128,9 @@ async function downloadUi(
       createWriteStream(archive, { flags: "wx", mode: 0o600 }),
       ...(signal ? [{ signal }] : [])
     );
-    if (hash.digest("hex") !== expectedUiSha256)
+    if (hash.digest("hex") !== expectedUiSha256) {
       throw new Error("UI release checksum verification failed");
+    }
     const extracted = path.join(temporary, "ui");
     await fs.mkdir(extracted, { mode: 0o700 });
     const tar = await import("tar");
@@ -143,15 +150,17 @@ async function downloadUi(
           !["File", "Directory"].includes(entry.type) ||
           path.isAbsolute(relative) ||
           relative.split(/[\\/]/).includes("..")
-        )
+        ) {
           invalid = true;
+        }
         return !invalid;
       },
     });
-    if (invalid)
+    if (invalid) {
       throw new Error(
         "The UI release archive contains unsafe or oversized entries"
       );
+    }
     const manifest = JSON.parse(
       await fs.readFile(path.join(extracted, "package.json"), "utf8")
     ) as { name?: unknown; version?: unknown };
@@ -159,12 +168,15 @@ async function downloadUi(
       !(await uiEntry(extracted)) ||
       manifest.name !== "specbook-ui" ||
       manifest.version !== currentVersion
-    )
+    ) {
       throw new Error("The UI release does not match this CLI version");
+    }
     try {
       await fs.rename(extracted, target);
     } catch (error) {
-      if (!(await uiEntry(target))) throw error;
+      if (!(await uiEntry(target))) {
+        throw error;
+      }
     }
   } finally {
     await fs.rm(temporary, { recursive: true, force: true });
@@ -180,35 +192,43 @@ export async function resolveUi(
 }> {
   if (options.ui) {
     const directory = path.resolve(options.ui);
-    if (!(await uiEntry(directory)))
+    if (!(await uiEntry(directory))) {
       throw new Error(
         "--ui must point to an extracted Specbook standalone UI with server.js. Download the UI artifact matching this CLI version and extract it first."
       );
+    }
     return { directory, source: "explicit" };
   }
   for (const directory of [
     path.join(moduleDirectory, "ui"),
     path.join(packageDirectory, "ui"),
   ]) {
-    if (await uiEntry(directory)) return { directory, source: "bundled" };
+    if (await uiEntry(directory)) {
+      return { directory, source: "bundled" };
+    }
   }
   const currentVersion = await version();
   const directory = path.join(configHome(), "ui", currentVersion);
-  if (await uiEntry(directory)) return { directory, source: "cache" };
+  if (await uiEntry(directory)) {
+    return { directory, source: "cache" };
+  }
   const release =
     process.env.SPECBOOK_UI_RELEASE_URL ??
     "https://github.com/gustavo-ferreira03/specbook/releases/download/v{version}/specbook-ui-{version}.tar.gz";
   const url = normalizeServerUrl(
     release.replaceAll("{version}", currentVersion)
   );
-  if (new URL(url).protocol !== "https:")
+  if (new URL(url).protocol !== "https:") {
     throw new Error("SPECBOOK_UI_RELEASE_URL must use HTTPS");
+  }
   await emit({ event: "downloading_ui", version: currentVersion });
   try {
     await downloadUi(currentVersion, directory, url, options.signal);
     return { directory, source: "download" };
   } catch (error) {
-    if (options.signal?.aborted) throw options.signal.reason;
+    if (options.signal?.aborted) {
+      throw options.signal.reason;
+    }
     const reason =
       error instanceof Error ? error.message : "UI download failed";
     throw new Error(
@@ -223,10 +243,11 @@ function portNumber(
   label: string
 ): number {
   const number = value === undefined ? fallback : Number(value);
-  if (!Number.isInteger(number) || number < 1 || number > 65535)
+  if (!Number.isInteger(number) || number < 1 || number > 65535) {
     throw new Error(
       `Use ${label === "API" ? "an" : "a"} ${label} port between 1 and 65535`
     );
+  }
   return number;
 }
 
@@ -253,10 +274,13 @@ async function availablePort(host: string, port: number): Promise<void> {
 }
 
 async function cliPackage(data: string): Promise<string> {
-  if (process.env.SPECBOOK_CLI_PACKAGE_FILE)
+  if (process.env.SPECBOOK_CLI_PACKAGE_FILE) {
     return path.resolve(process.env.SPECBOOK_CLI_PACKAGE_FILE);
+  }
   const bundled = path.join(packageDirectory, "dist", "specbook.tgz");
-  if ((await fs.stat(bundled).catch(() => null))?.isFile()) return bundled;
+  if ((await fs.stat(bundled).catch(() => null))?.isFile()) {
+    return bundled;
+  }
   const directory = path.join(data, "cli");
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const file = path.join(directory, "specbook.tgz");
@@ -309,23 +333,26 @@ export async function runServe(
     options.port !== undefined ? port - 1 : 4000,
     "API"
   );
-  if (port === apiPort)
+  if (port === apiPort) {
     throw new Error(
       "The web UI and API ports must differ; set PORT for the API"
     );
+  }
   const host = options.host ?? process.env.HOST ?? "127.0.0.1";
-  if (!host || /[\s/\\?#@]/.test(host))
+  if (!host || /[\s/\\?#@]/.test(host)) {
     throw new Error("Use a hostname or IP address for --host");
+  }
   const data = path.resolve(
     options.data ??
       process.env.SPECBOOK_STORAGE_DIR ??
       path.join(configHome(), "server")
   );
   const serverEntry = path.join(packageDirectory, "dist", "server", "index.js");
-  if (!(await fs.stat(serverEntry).catch(() => null))?.isFile())
+  if (!(await fs.stat(serverEntry).catch(() => null))?.isFile()) {
     throw new Error(
       "The server runtime is not built. Install a packed Specbook CLI or run pnpm --filter @specbook/runtime --filter specbook build in this checkout."
     );
+  }
   const resolvedUi = await resolveUi(options, emit);
   options.signal?.throwIfAborted();
   await availablePort(host, apiPort);
@@ -380,14 +407,18 @@ export async function runServe(
         pending += chunk.toString();
         const lines = pending.split("\n");
         pending = lines.pop() ?? "";
-        for (const line of lines) write(line);
+        for (const line of lines) {
+          write(line);
+        }
         if (pending.length > 64_000) {
           write(pending.slice(0, 64_000));
           pending = "";
         }
       });
       stream?.on("end", () => {
-        if (pending) write(pending);
+        if (pending) {
+          write(pending);
+        }
       });
     }
     state.done = new Promise((resolve) => {
@@ -421,7 +452,9 @@ export async function runServe(
           redirect: "error",
         });
         await fetched.body?.cancel();
-        if (fetched.ok) return;
+        if (fetched.ok) {
+          return;
+        }
       } catch {
         signal.throwIfAborted();
       }
@@ -451,16 +484,22 @@ export async function runServe(
     });
     await new Promise<void>((resolve) => {
       signal.addEventListener("abort", () => resolve(), { once: true });
-      if (signal.aborted) resolve();
+      if (signal.aborted) {
+        resolve();
+      }
     });
-    if (startup.signal.aborted) throw startup.signal.reason;
+    if (startup.signal.aborted) {
+      throw startup.signal.reason;
+    }
   } finally {
     startup.abort();
-    for (const state of children)
+    for (const state of children) {
       if (!state.exited) state.child.kill("SIGTERM");
+    }
     const force = setTimeout(() => {
-      for (const state of children)
+      for (const state of children) {
         if (!state.exited) state.child.kill("SIGKILL");
+      }
     }, 12_000);
     await Promise.all(children.map((state) => state.done));
     clearTimeout(force);

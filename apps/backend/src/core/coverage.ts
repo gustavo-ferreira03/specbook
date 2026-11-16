@@ -89,11 +89,12 @@ function testedRoutes(source: string): string[] {
               argument.expressions.length === 0
             ? argument.quasis[0]?.value.cooked
             : null;
-      if ((fixtureCall || assertion) && value && routePath(value))
+      if ((fixtureCall || assertion) && value && routePath(value)) {
         routes.add(value);
+      }
     }
     for (const value of Object.values(node)) {
-      if (Array.isArray(value))
+      if (Array.isArray(value)) {
         for (const child of value) {
           if (
             child &&
@@ -102,13 +103,14 @@ function testedRoutes(source: string): string[] {
           )
             visit(child);
         }
-      else if (
+      } else if (
         value &&
         typeof value === "object" &&
         "type" in value &&
         typeof value.type === "string"
-      )
+      ) {
         visit(value as t.Node);
+      }
     }
   };
   visit(parse(source, { sourceType: "module", plugins: ["typescript"] }));
@@ -122,7 +124,9 @@ const analyses = new Map<
 >();
 
 async function implementation(spec: Spec): Promise<Implementation> {
-  if (spec.status === "invalid") return { valid: false, routes: [] };
+  if (spec.status === "invalid") {
+    return { valid: false, routes: [] };
+  }
   const root = repoGit.getRepoDir(spec.projectId);
   try {
     const [source, yaml] = await Promise.all([
@@ -132,14 +136,16 @@ async function implementation(spec: Spec): Promise<Implementation> {
     if (
       sourceHashOf(source) !== spec.sourceHash ||
       markdownHashOf(yaml) !== spec.markdownHash
-    )
+    ) {
       return { valid: false, routes: [] };
+    }
     const cached = analyses.get(spec.id);
     if (
       cached?.sourceHash === spec.sourceHash &&
       cached.markdownHash === spec.markdownHash
-    )
+    ) {
       return cached.result;
+    }
     const valid = validateSpecSource(source, parseSpecYaml(yaml).humanSpec).ok;
     const result = { valid, routes: valid ? testedRoutes(source) : [] };
     analyses.set(spec.id, {
@@ -157,8 +163,9 @@ function subtree(rootId: string, features: Feature[]): Set<string> {
   const ids = new Set([rootId]);
   for (let size = 0; size !== ids.size;) {
     size = ids.size;
-    for (const feature of features)
+    for (const feature of features) {
       if (feature.parentId && ids.has(feature.parentId)) ids.add(feature.id);
+    }
   }
   return ids;
 }

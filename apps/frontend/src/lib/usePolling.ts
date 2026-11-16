@@ -13,11 +13,14 @@ export function useVisiblePolling(
   });
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      return;
+    }
     let timer: number | null = null;
     const startTimer = () => {
-      if (timer === null)
+      if (timer === null) {
         timer = window.setInterval(() => pollRef.current(), intervalMs);
+      }
     };
     const stopTimer = () => {
       if (timer !== null) {
@@ -33,7 +36,9 @@ export function useVisiblePolling(
       pollRef.current();
       startTimer();
     };
-    if (!document.hidden) startTimer();
+    if (!document.hidden) {
+      startTimer();
+    }
     document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       stopTimer();

@@ -257,8 +257,9 @@ describe("CI access and quality gates", () => {
         (entry) => entry.environmentId === environment.id
       )
     );
-    for (const token of [allowed, ordinaryRunner, wrongGroup, wrongProject])
+    for (const token of [allowed, ordinaryRunner, wrongGroup, wrongProject]) {
       await revokeRunnerToken(token.runner.id);
+    }
   });
 
   test("tunnel upgrades require a dedicated token and survive environment renames", async () => {
@@ -371,12 +372,15 @@ describe("CI access and quality gates", () => {
       );
       await response.body?.cancel();
     } finally {
-      for (const socket of sockets) socket.terminate();
+      for (const socket of sockets) {
+        socket.terminate();
+      }
       detach();
       server.closeIdleConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      for (const token of [ordinary, dedicated])
+      for (const token of [ordinary, dedicated]) {
         await revokeRunnerToken(token.runner.id);
+      }
     }
   });
 
@@ -1295,11 +1299,12 @@ describe("CI access and quality gates", () => {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     };
-    for (let i = 0; i < 2; i++)
+    for (let i = 0; i < 2; i++) {
       assert.equal(
         (await app.request(url, { method: "POST", headers, body })).status,
         202
       );
+    }
     const signals = await stewardRepository.signals(project.id);
     assert.equal(signals.length, 1);
     assert.equal(signals[0]?.kind, "deployment");
@@ -1371,8 +1376,9 @@ describe("CI access and quality gates", () => {
       assert.equal((await post({ url: target })).status, 400);
       assert.equal((await post({ baseUrl: target }, "runs")).status, 400);
     }
-    for (let index = 0; index < 2; index++)
+    for (let index = 0; index < 2; index++) {
       assert.equal((await post({ url: "https://1.1.1.1" })).status, 202);
+    }
     assert.equal((await stewardRepository.signals(project.id)).length, 1);
     assert.equal((await post({ url: "https://8.8.8.8" })).status, 202);
     const row = (await ciRepository.token(project.id))!;
@@ -1442,16 +1448,18 @@ describe("CI access and quality gates", () => {
       "fc00::1",
       "fe80::1",
       "2002:7f00:1::1",
-    ])
+    ]) {
       assert.equal(isPrivateAddress(address), true, address);
+    }
     for (const address of [
       "8.8.8.8",
       "1.1.1.1",
       "2001:4860:4860::8888",
       "2606:4700:4700::1111",
       "::ffff:8.8.8.8",
-    ])
+    ]) {
       assert.equal(isPrivateAddress(address), false, address);
+    }
     await assert.rejects(
       () =>
         resolveTarget("https://mixed.test", false, async () => [
@@ -1612,7 +1620,7 @@ describe("CI access and quality gates", () => {
       ).status,
       "failed"
     );
-    for (const format of ["junit", "markdown", "json"])
+    for (const format of ["junit", "markdown", "json"]) {
       assert.equal(
         (
           await app.request(`/ci/runs/${batch.id}?wait=true&format=${format}`, {
@@ -1621,6 +1629,7 @@ describe("CI access and quality gates", () => {
         ).status,
         200
       );
+    }
     const settings = (await (
       await app.request(`/projects/${project.id}/ci`, {
         headers: browserHeaders,
@@ -1649,13 +1658,14 @@ describe("CI access and quality gates", () => {
       "file:///etc/passwd",
       "https://user:pass@example.com",
       "not-a-url",
-    ])
+    ]) {
       assert.equal(ciRunSchema.safeParse({ baseUrl }).success, false);
+    }
     for (const origin of [
       "https://*.example.com",
       "https://example.com/path",
       "https://example.com?query",
-    ])
+    ]) {
       assert.equal(
         environmentSchema.safeParse({
           name: "Production",
@@ -1664,6 +1674,7 @@ describe("CI access and quality gates", () => {
         }).success,
         false
       );
+    }
     assert.equal(
       environmentSchema.safeParse({
         name: "Private",
@@ -1812,19 +1823,20 @@ describe("CI access and quality gates", () => {
                 results: [],
               })
         );
-      } else if (request.url?.includes("format=junit"))
+      } else if (request.url?.includes("format=junit")) {
         response.end('<testsuite tests="1" failures="0"/>');
-      else if (request.url?.includes("format=markdown"))
+      } else if (request.url?.includes("format=markdown")) {
         response.end("## Specbook: passed");
-      else if (request.url?.includes("format=html"))
+      } else if (request.url?.includes("format=html")) {
         response.end("<!doctype html><title>Specbook report</title>");
-      else {
+      } else {
         polls++;
         if (polls === 1) {
           response.statusCode = 503;
           response.end("Restarting");
-        } else if (polls === 2) request.socket.destroy();
-        else
+        } else if (polls === 2) {
+          request.socket.destroy();
+        } else {
           response.end(
             JSON.stringify({
               batch: { id: "batch-id" },
@@ -1840,6 +1852,7 @@ describe("CI access and quality gates", () => {
               results: [],
             })
           );
+        }
       }
     });
     await new Promise<void>((resolve) =>
@@ -1937,7 +1950,9 @@ describe("CI access and quality gates", () => {
     const server = http.createServer(async (request, response) => {
       const target = new URL(request.url!, "http://localhost");
       let body = "";
-      for await (const chunk of request) body += chunk;
+      for await (const chunk of request) {
+        body += chunk;
+      }
       response.setHeader("Content-Type", "application/json");
       if (target.pathname.startsWith("/specbook/")) {
         assert.equal(request.headers.authorization, "Bearer test-ci-token");
@@ -1965,12 +1980,13 @@ describe("CI access and quality gates", () => {
               },
             })
           );
-        } else
+        } else {
           response.end(
             target.searchParams.get("format") === "junit"
               ? '<testsuite tests="1"/>'
               : `## Specbook: ${passing ? "passed" : "failed"}\nhttps://example.com/results\ntest-ci-token github-test-token gitlab-test-token`
           );
+        }
         return;
       }
       const github = target.pathname.startsWith("/github/");
@@ -1989,12 +2005,13 @@ describe("CI access and quality gates", () => {
         response.end(JSON.stringify({ id: 77 }));
         return;
       }
-      if (!github)
+      if (!github) {
         assert.match(
           target.pathname,
           /^\/gitlab\/projects\/123\//,
           "notes belong to the MR project even when the CI job runs in a fork"
         );
+      }
       const list = github ? comments : notes;
       if (request.method === "GET") {
         const start = (Number(target.searchParams.get("page")) - 1) * 100;
@@ -2042,12 +2059,13 @@ describe("CI access and quality gates", () => {
       body: `${marker}\nHuman comment`,
       user: { login: "human" },
     });
-    for (let index = 0; index < 100; index++)
+    for (let index = 0; index < 100; index++) {
       comments.push({
         id: index + 2,
         body: "Other comment",
         user: { login: "human" },
       });
+    }
     notes.push({
       id: 1,
       body: `${marker}\nSomeone else's note`,
@@ -2211,8 +2229,9 @@ describe("CI access and quality gates", () => {
         "github-test-token",
         "gitlab-test-token",
         "job-token",
-      ])
+      ]) {
         assert.ok(!failed.output.includes(token));
+      }
       const summary = await fs.readFile(
         path.join(directory, "summary.md"),
         "utf8"

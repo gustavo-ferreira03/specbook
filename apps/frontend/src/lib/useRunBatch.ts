@@ -104,7 +104,9 @@ export function useRunBatch(
         setOpen(true);
         return;
       }
-      if (targets.length === 0) return;
+      if (targets.length === 0) {
+        return;
+      }
       const controller = new AbortController();
       controllerRef.current = controller;
       const { signal } = controller;
@@ -127,7 +129,9 @@ export function useRunBatch(
       setOpen(true);
 
       const apply = (batch: RunBatch) => {
-        if (signal.aborted) return;
+        if (signal.aborted) {
+          return;
+        }
         setItems(itemsFromBatch(batch));
         setEnvironment(batch.environment ?? null);
         setQueue(batch.queue ?? null);
@@ -177,9 +181,13 @@ export function useRunBatch(
             setReportUrl(
               result.reportUrl ? `${API_URL}${result.reportUrl}` : null
             );
-            if (batch.status !== "running") break;
+            if (batch.status !== "running") {
+              break;
+            }
           } catch (caught) {
-            if (isAbortError(caught)) throw caught;
+            if (isAbortError(caught)) {
+              throw caught;
+            }
             failures += 1;
             if (failures >= MAX_CONSECUTIVE_POLL_FAILURES) {
               markUnknown();
@@ -194,7 +202,9 @@ export function useRunBatch(
           }
         }
       } catch (caught) {
-        if (isAbortError(caught)) return;
+        if (isAbortError(caught)) {
+          return;
+        }
         if (!started) {
           setItems((current) =>
             current.map((item) => ({ ...item, status: "skipped" }))
@@ -205,7 +215,9 @@ export function useRunBatch(
           setError(errorMessage(caught));
         }
       } finally {
-        if (controllerRef.current === controller) controllerRef.current = null;
+        if (controllerRef.current === controller) {
+          controllerRef.current = null;
+        }
         if (!signal.aborted) {
           setRunning(false);
           setWarning("");

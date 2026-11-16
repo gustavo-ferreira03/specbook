@@ -21,8 +21,9 @@ function fakeMcp(urls: string[], snapshot = '- button "Products" [ref=e1]') {
     client: {
       callTool: async (request: { name: string; arguments: unknown }) => {
         calls.push(request);
-        if (request.name === "browser_navigate_back")
+        if (request.name === "browser_navigate_back") {
           current = Math.min(current + 1, urls.length - 1);
+        }
         const url = urls[current];
         return {
           content: [

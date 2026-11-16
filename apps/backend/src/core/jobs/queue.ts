@@ -22,20 +22,27 @@ export async function enqueueJob(
 ): Promise<Job> {
   if (id) {
     const existing = await jobsRepository.get(id);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
   }
   if (options.sourceChatId) {
     const source = await chatsRepository.getChatRow(options.sourceChatId);
-    if (source && source.projectId !== projectId)
+    if (source && source.projectId !== projectId) {
       throw new Error("The source conversation must belong to this project.");
-    if (!source) options = { ...options, sourceChatId: null };
+    }
+    if (!source) {
+      options = { ...options, sourceChatId: null };
+    }
   }
   const parsed = createJobSchema.parse(input);
   let pendingMessage = parsed.goal;
   if (parsed.kind === "failure_triage") {
     const input = await prepareTriageGoal(projectId, parsed.runId);
     const existing = await jobsRepository.forRun(input.runId);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
     parsed.specId = input.specId;
     parsed.goal = input.goal;
     pendingMessage = input.message;
@@ -49,8 +56,9 @@ export async function enqueueJob(
     chatId: chat.id,
     sourceChatId: options.sourceChatId,
   });
-  if (await isAgentPaused(projectId))
+  if (await isAgentPaused(projectId)) {
     await jobsRepository.transition(job.id, "queued", "paused");
+  }
   await jobsRepository.log(job.id, "queued", parsed.trigger);
   requestJobDrain();
   return (await jobsRepository.get(job.id))!;

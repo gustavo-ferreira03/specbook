@@ -50,7 +50,9 @@ export function isChatDeleting(id: string): boolean {
 }
 
 export function tryReserveChatTurn(id: string): boolean {
-  if (busyChats.has(id) || deletingChats.has(id)) return false;
+  if (busyChats.has(id) || deletingChats.has(id)) {
+    return false;
+  }
   busyChats.add(id);
   return true;
 }
@@ -71,7 +73,9 @@ export function subscribeToChatUpdates(
   chatUpdateListeners.set(id, listeners);
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0) chatUpdateListeners.delete(id);
+    if (listeners.size === 0) {
+      chatUpdateListeners.delete(id);
+    }
   };
 }
 
@@ -79,7 +83,9 @@ export function publishChatUpdate(
   id: string,
   event: ChatUpdateEvent = { type: "updated" }
 ): void {
-  for (const listener of chatUpdateListeners.get(id) ?? []) listener(event);
+  for (const listener of chatUpdateListeners.get(id) ?? []) {
+    listener(event);
+  }
 }
 
 export function getChatQueueState(id: string): {
@@ -112,8 +118,9 @@ export function clearActiveChatSession(
   id: string,
   session: AgentSession
 ): void {
-  if (activeChatSessions.get(id)?.session === session)
+  if (activeChatSessions.get(id)?.session === session) {
     activeChatSessions.delete(id);
+  }
 }
 
 export function takePendingFollowUps(id: string): string[] {
@@ -130,9 +137,12 @@ export async function queueChatFollowUp(
   id: string,
   text: string
 ): Promise<void> {
-  if (deletingChats.has(id)) throw new Error("Chat is being deleted");
-  if (!busyChats.has(id))
+  if (deletingChats.has(id)) {
+    throw new Error("Chat is being deleted");
+  }
+  if (!busyChats.has(id)) {
     throw new Error("The agent is not currently replying");
+  }
 
   const active = activeChatSessions.get(id);
   if (active) {
@@ -165,7 +175,9 @@ export async function abortChatTurn(id: string): Promise<void> {
 }
 
 export function beginChatDeletion(id: string): boolean {
-  if (busyChats.has(id) || deletingChats.has(id)) return false;
+  if (busyChats.has(id) || deletingChats.has(id)) {
+    return false;
+  }
   deletingChats.add(id);
   return true;
 }

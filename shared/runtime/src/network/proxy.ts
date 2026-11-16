@@ -16,16 +16,20 @@ export async function createRunProxy(
     sockets.add(socket);
     socket.on("error", () => socket.destroy());
     socket.on("close", () => sockets.delete(socket));
-    if (socket instanceof net.Socket)
+    if (socket instanceof net.Socket) {
       socket.setTimeout(30_000, () => socket.destroy());
+    }
     return socket;
   };
   const server = http.createServer((request, response) => {
     void (async () => {
       const target = httpTarget(request.url ?? "");
-      if (target.protocol !== "http:") throw new Error("Use CONNECT for HTTPS");
-      if (connectTarget && !privateOrigins.includes(target.origin))
+      if (target.protocol !== "http:") {
+        throw new Error("Use CONNECT for HTTPS");
+      }
+      if (connectTarget && !privateOrigins.includes(target.origin)) {
         throw new Error("Network target blocked");
+      }
       const connection = connectTarget
         ? track(await connectTarget(target))
         : undefined;
@@ -71,7 +75,9 @@ export async function createRunProxy(
       );
       upstream.on("socket", track);
       upstream.on("error", () => {
-        if (!response.headersSent) response.writeHead(502);
+        if (!response.headersSent) {
+          response.writeHead(502);
+        }
         response.end();
       });
       response.on("close", () => upstream.destroy());
@@ -91,11 +97,15 @@ export async function createRunProxy(
       const allowed =
         privateOrigins.includes(target.origin) ||
         privateOrigins.includes(plain.origin);
-      if (connectTarget && !allowed) throw new Error("Network target blocked");
+      if (connectTarget && !allowed) {
+        throw new Error("Network target blocked");
+      }
       const address = connectTarget
         ? undefined
         : await resolveTarget(target, allowed, resolver);
-      if (socket.destroyed) return;
+      if (socket.destroyed) {
+        return;
+      }
       const upstream = track(
         connectTarget
           ? await connectTarget(
@@ -113,12 +123,17 @@ export async function createRunProxy(
       }
       const connected = () => {
         socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        if (head.length) upstream.write(head);
+        if (head.length) {
+          upstream.write(head);
+        }
         upstream.pipe(socket);
         socket.pipe(upstream);
       };
-      if (connectTarget) connected();
-      else upstream.on("connect", connected);
+      if (connectTarget) {
+        connected();
+      } else {
+        upstream.on("connect", connected);
+      }
       upstream.on("error", () => socket.destroy());
       socket.on("close", () => upstream.destroy());
     })().catch(() =>
@@ -128,9 +143,12 @@ export async function createRunProxy(
   server.on("upgrade", (request, socket, head) => {
     void (async () => {
       const target = httpTarget((request.url ?? "").replace(/^ws:/, "http:"));
-      if (target.protocol !== "http:") throw new Error("Use CONNECT for HTTPS");
-      if (connectTarget && !privateOrigins.includes(target.origin))
+      if (target.protocol !== "http:") {
+        throw new Error("Use CONNECT for HTTPS");
+      }
+      if (connectTarget && !privateOrigins.includes(target.origin)) {
         throw new Error("Network target blocked");
+      }
       const connection = connectTarget
         ? track(await connectTarget(target))
         : undefined;
@@ -176,8 +194,12 @@ export async function createRunProxy(
             .map(([key, value]) => `${key}: ${value}`)
             .join("\r\n")}\r\n\r\n`
         );
-        if (head.length) connection.write(head);
-        if (upstreamHead.length) socket.write(upstreamHead);
+        if (head.length) {
+          connection.write(head);
+        }
+        if (upstreamHead.length) {
+          socket.write(upstreamHead);
+        }
         connection.pipe(socket);
         socket.pipe(connection);
         socket.on("close", () => connection.destroy());
@@ -201,7 +223,9 @@ export async function createRunProxy(
   return {
     server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     async close() {
-      for (const socket of sockets) socket.destroy();
+      for (const socket of sockets) {
+        socket.destroy();
+      }
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };

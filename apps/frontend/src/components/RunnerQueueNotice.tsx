@@ -12,7 +12,9 @@ export function RunnerQueueNotice({
   queue: RunnerQueueEntry | null | undefined;
   className?: string;
 }) {
-  if (!queue || queue.queued === 0) return null;
+  if (!queue || queue.queued === 0) {
+    return null;
+  }
   return (
     <div
       className={cn("text-control text-ink flex items-start gap-2", className)}

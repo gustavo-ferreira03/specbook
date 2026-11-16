@@ -54,14 +54,16 @@ const verifyCiToken: BearerVerifier = async (c) => {
   const projectId = c.req.path.match(
     /^\/ci\/projects\/([0-9a-f-]{36})\//i
   )?.[1];
-  if (projectId)
+  if (projectId) {
     return (await authenticateCiToken(projectId, authorization))
       ? true
       : rejectCi();
+  }
   const batchId = c.req.path.match(/^\/ci\/runs\/([0-9a-f-]{36})$/i)?.[1];
   const batch = batchId ? await getRunBatch(batchId) : null;
-  if (!batch?.ci)
+  if (!batch?.ci) {
     return Response.json({ error: "CI batch not found" }, { status: 404 });
+  }
   return (await authenticateCiToken(batch.projectId, authorization))
     ? true
     : rejectCi();
@@ -74,7 +76,9 @@ const projectAuth: MiddlewareHandler = async (c, next) => {
 
 function ciError(c: Context, error: unknown): never {
   if (error instanceof CiRequestError) {
-    if (error.retryAfter) c.header("Retry-After", String(error.retryAfter));
+    if (error.retryAfter) {
+      c.header("Retry-After", String(error.retryAfter));
+    }
     throw new HTTPException(error.status, { message: error.message });
   }
   throw error;
@@ -162,20 +166,24 @@ export function createCiRouter(): Hono {
     "/ci/runs/:batchId",
     access("ci-token", verifyCiToken),
     async (c) => {
-      if (!c.req.header("authorization"))
+      if (!c.req.header("authorization")) {
         throw new HTTPException(401, {
           message: "A valid project CI bearer token is required",
         });
+      }
       const id = c.req.param("batchId");
-      if (!z.string().uuid().safeParse(id).success)
+      if (!z.string().uuid().safeParse(id).success) {
         throw new HTTPException(404, { message: "CI batch not found" });
+      }
       let batch = await getRunBatch(id);
-      if (!batch?.ci)
+      if (!batch?.ci) {
         throw new HTTPException(404, { message: "CI batch not found" });
+      }
       await authenticate(c, batch.projectId);
       const query = ciResultQuerySchema.safeParse(c.req.query());
-      if (!query.success)
+      if (!query.success) {
         throw new HTTPException(400, { message: "Invalid CI result query" });
+      }
       const { wait, format } = query.data;
       let result = await ciResult(batch, publicFrontendOrigin(c));
       const deadline = Date.now() + 25_000;
@@ -188,18 +196,21 @@ export function createCiRouter(): Hono {
         await new Promise((resolve) => setTimeout(resolve, 500));
         await authenticate(c, batch.projectId);
         batch = await getRunBatch(id);
-        if (!batch)
+        if (!batch) {
           throw new HTTPException(404, { message: "CI batch not found" });
+        }
         result = await ciResult(batch, publicFrontendOrigin(c));
       }
-      if (format === "junit")
+      if (format === "junit") {
         return c.body(junitResult(result), 200, {
           "Content-Type": "application/xml; charset=utf-8",
         });
-      if (format === "markdown")
+      }
+      if (format === "markdown") {
         return c.body(markdownResult(result), 200, {
           "Content-Type": "text/markdown; charset=utf-8",
         });
+      }
       if (format === "html") {
         const html = await htmlReport(result);
         return c.body(html, 200, htmlReportHeaders(html));

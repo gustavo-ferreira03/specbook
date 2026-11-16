@@ -41,18 +41,24 @@ export function ConfirmDeleteDialog({
     <AlertDialog
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen && !busy) onCancel();
+        if (!nextOpen && !busy) {
+          onCancel();
+        }
       }}
     >
       <AlertDialogContent
         onCloseAutoFocus={(event) => {
           const trigger = returnFocusRef?.current;
-          if (!trigger?.isConnected) return;
+          if (!trigger?.isConnected) {
+            return;
+          }
           event.preventDefault();
           trigger.focus();
         }}
         onEscapeKeyDown={(event) => {
-          if (busy) event.preventDefault();
+          if (busy) {
+            event.preventDefault();
+          }
         }}
       >
         <div className="flex items-start gap-3.5 px-5 pt-5">

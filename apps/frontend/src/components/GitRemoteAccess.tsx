@@ -68,10 +68,14 @@ export function GitRemoteAccess({
     let active = true;
     getProjectGitRemote(projectId)
       .then((result) => {
-        if (active) setRemote(result.remote);
+        if (active) {
+          setRemote(result.remote);
+        }
       })
       .catch((caught: Error) => {
-        if (active) setError(caught.message);
+        if (active) {
+          setError(caught.message);
+        }
       });
     return () => {
       active = false;
@@ -124,7 +128,9 @@ export function GitRemoteAccess({
   }
 
   async function confirmTokenAction() {
-    if (!confirmation) return;
+    if (!confirmation) {
+      return;
+    }
     setConfirmError("");
     const action = confirmation;
     setBusy(action === "rotate" ? "issue" : "revoke");
@@ -292,8 +298,11 @@ export function GitRemoteAccess({
                 variant={hasToken ? "outline" : "default"}
                 disabled={Boolean(busy)}
                 onClick={(event) => {
-                  if (hasToken) openConfirmation("rotate", event.currentTarget);
-                  else void issueToken();
+                  if (hasToken) {
+                    openConfirmation("rotate", event.currentTarget);
+                  } else {
+                    void issueToken();
+                  }
                 }}
               >
                 {busy === "issue" ? (

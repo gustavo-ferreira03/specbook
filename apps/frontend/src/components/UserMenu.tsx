@@ -61,7 +61,9 @@ export function UserMenu() {
       setBusy(false);
     }
   }
-  if (!user) return null;
+  if (!user) {
+    return null;
+  }
   return (
     <div className="min-w-0">
       <DropdownMenu>

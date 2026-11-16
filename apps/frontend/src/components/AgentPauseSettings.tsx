@@ -30,14 +30,17 @@ export function AgentPauseSettings() {
     api<{ paused: boolean }>("/settings/agent", { signal: controller.signal })
       .then((result) => setPaused(result.paused))
       .catch((error) => {
-        if (!isAbortError(error))
+        if (!isAbortError(error)) {
           setLoadError("The agent pause setting could not load. Try again.");
+        }
       });
     return () => controller.abort();
   }, [retryKey]);
 
   async function toggle() {
-    if (paused === null) return;
+    if (paused === null) {
+      return;
+    }
     setSaving(true);
     setFeedback(null);
     try {

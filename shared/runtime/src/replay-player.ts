@@ -66,15 +66,23 @@ export function stepName(step: { kind: string }, ordinal: number): string {
 export function assertionWait(
   reason: string | null
 ): { ms: number; summary: string } | null {
-  if (!reason?.includes("expect(locator).toHaveCount(expected) failed"))
+  if (!reason?.includes("expect(locator).toHaveCount(expected) failed")) {
     return null;
+  }
   const expected = reason.match(/^Expected:\s*(\d+)\s*$/m)?.[1];
   const received = reason.match(/^Received:\s*(\d+)\s*$/m)?.[1];
   const timeout = reason.match(/^Timeout:\s*(\d+)ms\s*$/m)?.[1];
-  if (expected === undefined || received === undefined || timeout === undefined)
+  if (
+    expected === undefined ||
+    received === undefined ||
+    timeout === undefined
+  ) {
     return null;
+  }
   const ms = Number(timeout);
-  if (!Number.isSafeInteger(ms) || ms < 1) return null;
+  if (!Number.isSafeInteger(ms) || ms < 1) {
+    return null;
+  }
   const elapsed =
     ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
   return {
@@ -89,7 +97,9 @@ function prepareRecording(recording: unknown): {
   opening: number;
 } {
   const restored = restoreReplayEvents(recording);
-  if (!restored) throw new Error("Invalid replay recording");
+  if (!restored) {
+    throw new Error("Invalid replay recording");
+  }
   const recorded = restored as RecordedEvent[];
   // Preserve step markers from the blank tab, but open on the first real page.
   const page = recorded.findIndex(
@@ -141,9 +151,12 @@ function prepareRecording(recording: unknown): {
       event.type === 2 ||
       event.type === 4 ||
       event.timestamp > drawn.timestamp + 100
-    )
+    ) {
       break;
-    if (event.type === 3 && event.data?.source === 0) firstFrame = event;
+    }
+    if (event.type === 3 && event.data?.source === 0) {
+      firstFrame = event;
+    }
   }
   const opening = firstFrame?.timestamp ?? trimmed[0].timestamp;
   const events = trimmed.map((event) =>
@@ -166,10 +179,13 @@ function prepareRecording(recording: unknown): {
       event.type !== 5 ||
       event.data?.tag !== "specbook-step" ||
       event.data.payload?.phase !== "start"
-    )
+    ) {
       continue;
+    }
     const step = event.data.payload;
-    if (step.kind === "step") ordinal += 1;
+    if (step.kind === "step") {
+      ordinal += 1;
+    }
     markers.set(step.number, {
       number: step.number,
       offset: Math.max(0, event.timestamp - opening),
@@ -327,7 +343,9 @@ export function mountReplay(
   let shownStep: ReplayStepMarker | null = null;
   const current = () => Math.max(0, Math.min(total, replayer.getCurrentTime()));
   const render = () => {
-    if (destroyed) return;
+    if (destroyed) {
+      return;
+    }
     const now = current();
     const ended = !playing && now >= total - 100;
     const idle = !playing && now < 50;
@@ -361,11 +379,12 @@ export function mountReplay(
     if (step !== shownStep) {
       shownStep = step;
       label.replaceChildren();
-      if (step)
+      if (step) {
         label.append(
           element("b", "", { textContent: step.name }),
           ` · ${step.title}`
         );
+      }
       options.onStep?.(step);
     }
   };
@@ -376,9 +395,13 @@ export function mountReplay(
     frame = playing && !destroyed ? window.requestAnimationFrame(loop) : 0;
   };
   const setPlaying = (value: boolean) => {
-    if (destroyed) return;
+    if (destroyed) {
+      return;
+    }
     playing = value;
-    if (playing && !frame) frame = window.requestAnimationFrame(loop);
+    if (playing && !frame) {
+      frame = window.requestAnimationFrame(loop);
+    }
     render();
   };
   const onStart = () => setPlaying(true);
@@ -389,7 +412,9 @@ export function mountReplay(
   replayer.on("finish", onPause);
   // rrweb rebuilds the opening frame only after the first event.
   const goto = (offset: number, play = false) => {
-    if (destroyed) return;
+    if (destroyed) {
+      return;
+    }
     player.goto(Math.max(1, Math.min(total, offset)), play);
     window.cancelAnimationFrame(renderFrame);
     renderFrame = window.requestAnimationFrame(() => {
@@ -398,9 +423,13 @@ export function mountReplay(
     });
   };
   const playPause = () => {
-    if (playing) player.pause();
-    else if (current() >= total - 100) goto(0, true);
-    else player.play();
+    if (playing) {
+      player.pause();
+    } else if (current() >= total - 100) {
+      goto(0, true);
+    } else {
+      player.play();
+    }
   };
   listen(toggle, "click", playPause);
   listen(hit, "click", playPause);
@@ -416,9 +445,11 @@ export function mountReplay(
     player.setSpeed(next);
   });
   listen(expand, "click", () => {
-    if (document.fullscreenElement === container)
+    if (document.fullscreenElement === container) {
       void document.exitFullscreen();
-    else void container.requestFullscreen?.();
+    } else {
+      void container.requestFullscreen?.();
+    }
   });
   listen(seek, "keydown", (event) => {
     const now = current();
@@ -432,7 +463,9 @@ export function mountReplay(
             : event.key === "End"
               ? total
               : null;
-    if (next === null) return;
+    if (next === null) {
+      return;
+    }
     event.preventDefault();
     goto(next, playing);
   });
@@ -446,34 +479,44 @@ export function mountReplay(
       Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * total;
     fill.style.width = percent(pending);
     knob.style.left = percent(pending);
-    if (!scrubFrame)
+    if (!scrubFrame) {
       scrubFrame = window.requestAnimationFrame(() => {
         scrubFrame = 0;
         if (destroyed) return;
         player.goto(Math.max(1, pending), false);
         render();
       });
+    }
   };
   listen(seek, "pointerdown", (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0) {
+      return;
+    }
     event.preventDefault();
     seek.focus();
     dragging = true;
     resume = playing;
-    if (playing) player.pause();
+    if (playing) {
+      player.pause();
+    }
     seek.setPointerCapture(event.pointerId);
     seek.classList.add("is-dragging");
     scrub(event.clientX);
   });
   listen(seek, "pointermove", (event) => {
-    if (dragging) scrub(event.clientX);
+    if (dragging) {
+      scrub(event.clientX);
+    }
   });
   const release = (event: PointerEvent) => {
-    if (!dragging) return;
+    if (!dragging) {
+      return;
+    }
     dragging = false;
     seek.classList.remove("is-dragging");
-    if (seek.hasPointerCapture(event.pointerId))
+    if (seek.hasPointerCapture(event.pointerId)) {
       seek.releasePointerCapture(event.pointerId);
+    }
     window.cancelAnimationFrame(scrubFrame);
     scrubFrame = 0;
     goto(pending, resume);
@@ -489,17 +532,20 @@ export function mountReplay(
         ? event.target.closest(".replay-mark")
         : null;
     const step = mark && markSteps.get(mark);
-    if (!mark || !step) return;
+    if (!mark || !step) {
+      return;
+    }
     tip.replaceChildren(
       element("b", "", { textContent: step.name }),
       ` ${step.title}`
     );
-    if (step.outcome)
+    if (step.outcome) {
       tip.append(
         element("span", `replay-tip-${step.outcome}`, {
           textContent: step.outcome[0].toUpperCase() + step.outcome.slice(1),
         })
       );
+    }
     tip.classList.add("is-visible");
     const box = mark.getBoundingClientRect();
     const area = container.getBoundingClientRect();
@@ -507,18 +553,27 @@ export function mountReplay(
     tip.style.top = `${box.top - area.top - tip.offsetHeight - 8}px`;
   });
   listen(seek, "pointerout", (event) => {
-    if (event.target instanceof Element && event.target.closest(".replay-mark"))
+    if (
+      event.target instanceof Element &&
+      event.target.closest(".replay-mark")
+    ) {
       tip.classList.remove("is-visible");
+    }
   });
   const resize = () => {
-    if (destroyed) return;
+    if (destroyed) {
+      return;
+    }
     let nextWidth = Math.floor(target.getBoundingClientRect().width);
-    if (nextWidth < 1) return;
-    if (document.fullscreenElement === container)
+    if (nextWidth < 1) {
+      return;
+    }
+    if (document.fullscreenElement === container) {
       nextWidth = Math.min(
         nextWidth,
         Math.floor((window.innerHeight - bar.offsetHeight - 32) / ratio)
       );
+    }
     player.$set({
       width: nextWidth,
       height: Math.max(180, Math.round(nextWidth * ratio)),
@@ -544,21 +599,29 @@ export function mountReplay(
   );
   goto(0);
   const status = container.querySelector<HTMLElement>(".replay-status");
-  if (status) status.hidden = true;
+  if (status) {
+    status.hidden = true;
+  }
   return {
     seekToStep(number) {
       const marker = markers.get(number);
-      if (!marker || destroyed) return false;
+      if (!marker || destroyed) {
+        return false;
+      }
       goto(marker.offset);
       container.dataset.currentStep = String(number);
       return true;
     },
     pause() {
-      if (!destroyed) player.pause();
+      if (!destroyed) {
+        player.pause();
+      }
     },
     resize,
     destroy() {
-      if (destroyed) return;
+      if (destroyed) {
+        return;
+      }
       destroyed = true;
       controller.abort();
       observer.disconnect();
@@ -569,13 +632,16 @@ export function mountReplay(
       replayer.off("resume", onStart);
       replayer.off("pause", onPause);
       replayer.off("finish", onPause);
-      if (document.fullscreenElement === container)
+      if (document.fullscreenElement === container) {
         void document.exitFullscreen();
+      }
       replayer.destroy();
       player.$destroy();
       bar.remove();
       tip.remove();
-      if (createdTarget) target.remove();
+      if (createdTarget) {
+        target.remove();
+      }
       delete container.dataset.currentTimeMs;
       delete container.dataset.currentStep;
       container.style.removeProperty("--replay-width");

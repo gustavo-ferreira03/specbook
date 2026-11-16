@@ -55,7 +55,9 @@ function sourceRejection(
   humanSpec: HumanSpec
 ): { rule: ValidatorRejection["rule"]; error: string } | null {
   const analysis = analyzeSpecSource(testSource);
-  if (!analysis.ok) return { rule: "source_validation", error: analysis.error };
+  if (!analysis.ok) {
+    return { rule: "source_validation", error: analysis.error };
+  }
   const stepsError = stepTitlesError(analysis.analysis.steps, humanSpec);
   return stepsError ? { rule: "named_steps", error: stepsError } : null;
 }
@@ -129,8 +131,9 @@ export function createDomainTools(
       ),
       async execute(_id, params) {
         const spec = await specsRepository.getSpec(params.specId);
-        if (!spec || spec.projectId !== projectId)
+        if (!spec || spec.projectId !== projectId) {
           return text(`Spec ${params.specId} not found in this project.`);
+        }
         try {
           const raw = await readSpecRawFiles(spec);
           const humanSpec =

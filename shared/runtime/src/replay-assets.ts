@@ -48,14 +48,18 @@ export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
   const codec = {
     count(size: number): void {
       bytes += size;
-      if (bytes > limit) throw new Error("Replay exceeds its expanded limit");
+      if (bytes > limit) {
+        throw new Error("Replay exceeds its expanded limit");
+      }
     },
     jsonBytes(item: string): number {
-      if (item.length > limit)
+      if (item.length > limit) {
         throw new Error("Replay exceeds its expanded limit");
+      }
       const text = JSON.stringify(item);
-      if (text.length > limit)
+      if (text.length > limit) {
         throw new Error("Replay exceeds its expanded limit");
+      }
       return encoder.encode(text).length;
     },
     reference(item: Record<string, unknown>): number {
@@ -71,7 +75,9 @@ export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
       return index as number;
     },
     restore(item: unknown, depth: number): unknown {
-      if (depth > 256) throw new Error("Replay nesting exceeds its limit");
+      if (depth > 256) {
+        throw new Error("Replay nesting exceeds its limit");
+      }
       if (typeof item === "string") {
         codec.count(codec.jsonBytes(item));
         return item;
@@ -84,8 +90,9 @@ export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
         codec.count(JSON.stringify(item).length);
         return item;
       }
-      if (!item || typeof item !== "object" || ancestors.has(item))
+      if (!item || typeof item !== "object" || ancestors.has(item)) {
         throw new Error("Invalid replay value");
+      }
       if (packed && !Array.isArray(item)) {
         const entry = item as Record<string, unknown>;
         if (Object.hasOwn(entry, "__specbookReplayAsset")) {
@@ -99,20 +106,23 @@ export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
             Object.keys(entry).length !== 1 ||
             !Array.isArray(parts) ||
             !parts.length
-          )
+          ) {
             throw new Error("Invalid replay string reference");
+          }
           let size = 2;
           const strings = parts.map((part) => {
             if (typeof part === "string") {
               size += codec.jsonBytes(part) - 2;
               return part;
             }
-            if (!part || typeof part !== "object" || Array.isArray(part))
+            if (!part || typeof part !== "object" || Array.isArray(part)) {
               throw new Error("Invalid replay string part");
+            }
             const index = codec.reference(part);
             size += assetSizes[index] - 2;
-            if (size > limit)
+            if (size > limit) {
               throw new Error("Replay exceeds its expanded limit");
+            }
             return assets[index];
           });
           codec.count(size);
@@ -123,9 +133,9 @@ export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
       const entries = Object.entries(item);
       codec.count(2 + Math.max(0, entries.length - 1));
       let result: unknown;
-      if (Array.isArray(item))
+      if (Array.isArray(item)) {
         result = item.map((part) => codec.restore(part, depth + 1));
-      else {
+      } else {
         const object: Record<string, unknown> = {};
         for (const [key, part] of entries) {
           codec.count(codec.jsonBytes(key) + 1);
@@ -144,7 +154,9 @@ export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
   };
   try {
     if (packed) {
-      if (!value || typeof value !== "object") return null;
+      if (!value || typeof value !== "object") {
+        return null;
+      }
       const recording = value as Record<string, unknown>;
       if (
         Object.keys(recording).length !== 3 ||
@@ -157,8 +169,9 @@ export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
         recording.assets.some(
           (asset) => typeof asset !== "string" || !image.test(asset)
         )
-      )
+      ) {
         return null;
+      }
       assets = recording.assets;
       source = recording.events;
     }
@@ -166,11 +179,13 @@ export function restoreReplayEvents(value: unknown): ReplayEvent[] | null {
       !Array.isArray(source) ||
       source.length < 2 ||
       source.length > maxEvents
-    )
+    ) {
       return null;
+    }
     assetSizes = assets.map((asset) => codec.jsonBytes(asset));
-    if (assetSizes.reduce((total, size) => total + size, 0) > limit)
+    if (assetSizes.reduce((total, size) => total + size, 0) > limit) {
       return null;
+    }
     const events = codec.restore(source, 0) as ReplayEvent[];
     return events.every(
       (event) =>
@@ -195,7 +210,9 @@ export function packReplayEvents(
   events: ReplayEvent[]
 ): ReplayRecording | null {
   const source = restoreReplayEvents(events);
-  if (!source) return null;
+  if (!source) {
+    return null;
+  }
   const assets: string[] = [];
   const indices = new Map<string, number>();
   const asset = (image: string): { __specbookReplayAsset: number } => {
@@ -209,31 +226,43 @@ export function packReplayEvents(
   };
   const pack = (value: unknown): unknown => {
     if (typeof value === "string") {
-      if (/^data:image\/[^,\s]+,/i.test(value)) return asset(value);
+      if (/^data:image\/[^,\s]+,/i.test(value)) {
+        return asset(value);
+      }
       const matches = [
         ...value.matchAll(
           /data:image\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*;base64,[a-z0-9+/=]+/gi
         ),
       ];
-      if (!matches.length) return value;
+      if (!matches.length) {
+        return value;
+      }
       const parts: (string | { __specbookReplayAsset: number })[] = [];
       let position = 0;
       for (const match of matches) {
-        if (match.index! > position)
+        if (match.index! > position) {
           parts.push(value.slice(position, match.index));
+        }
         parts.push(asset(match[0]));
         position = match.index! + match[0].length;
       }
-      if (position < value.length) parts.push(value.slice(position));
+      if (position < value.length) {
+        parts.push(value.slice(position));
+      }
       return { __specbookReplayString: parts };
     }
-    if (Array.isArray(value)) return value.map(pack);
-    if (!value || typeof value !== "object") return value;
+    if (Array.isArray(value)) {
+      return value.map(pack);
+    }
+    if (!value || typeof value !== "object") {
+      return value;
+    }
     if (
       Object.hasOwn(value, "__specbookReplayAsset") ||
       Object.hasOwn(value, "__specbookReplayString")
-    )
+    ) {
       throw new Error("Reserved replay reference key");
+    }
     return Object.fromEntries(
       Object.entries(value).map(([key, part]) => [key, pack(part)])
     );

@@ -105,8 +105,12 @@ function list(values: string[]): string {
 }
 
 function staticString(node: t.Node | null | undefined): string | null {
-  if (!node) return null;
-  if (node.type === "StringLiteral") return node.value;
+  if (!node) {
+    return null;
+  }
+  if (node.type === "StringLiteral") {
+    return node.value;
+  }
   if (
     node.type === "TemplateLiteral" &&
     node.expressions.length === 0 &&
@@ -122,8 +126,9 @@ function noTypeArguments(node: t.CallExpression): void {
     typeArguments?: unknown;
     typeParameters?: unknown;
   };
-  if (typed.typeArguments || typed.typeParameters)
+  if (typed.typeArguments || typed.typeParameters) {
     fail(node, "Type arguments are not allowed.");
+  }
 }
 
 class Validator {
@@ -139,10 +144,12 @@ class Validator {
 
   run(file: t.File): void {
     const program = file.program;
-    if (program.interpreter)
+    if (program.interpreter) {
       fail(program.interpreter, "A hashbang line is not allowed.");
-    if (program.directives.length > 0)
+    }
+    if (program.directives.length > 0) {
       fail(program.directives[0], "Directives are not allowed.");
+    }
     const [first, second, ...rest] = program.body;
     if (!first || first.type !== "ImportDeclaration") {
       fail(
@@ -151,11 +158,12 @@ class Validator {
       );
     }
     this.importDeclaration(first);
-    if (!second)
+    if (!second) {
       fail(
         first,
         'After the import, spec.ts must contain exactly one test("Title", async ({ page, step }) => { ... }) call.'
       );
+    }
     if (rest.length > 0) {
       fail(
         rest[0],
@@ -201,21 +209,29 @@ class Validator {
         );
       }
       const name = specifier.imported.name;
-      if (!IMPORTS.has(name))
+      if (!IMPORTS.has(name)) {
         fail(
           specifier,
           `"${name}" is not exported by "${SPEC_MODULE}"; import only test and expect.`
         );
-      if (specifier.local.name !== name)
+      }
+      if (specifier.local.name !== name) {
         fail(specifier, "Renaming imports is not allowed.");
-      if (specifier.importKind === "type" || specifier.importKind === "typeof")
+      }
+      if (
+        specifier.importKind === "type" ||
+        specifier.importKind === "typeof"
+      ) {
         fail(specifier, "Type imports are not allowed.");
-      if (this.imports.has(name))
+      }
+      if (this.imports.has(name)) {
         fail(specifier, `"${name}" is imported twice.`);
+      }
       this.imports.add(name);
     }
-    if (!this.imports.has("test"))
+    if (!this.imports.has("test")) {
       fail(node, `Import test from "${SPEC_MODULE}".`);
+    }
     this.importSource = {
       start: node.source.start ?? 0,
       end: node.source.end ?? 0,
@@ -237,14 +253,16 @@ class Validator {
       );
     }
     noTypeArguments(call);
-    if (call.arguments.length !== 2)
+    if (call.arguments.length !== 2) {
       fail(call, "test() takes a title and an async function.");
+    }
     const title = staticString(call.arguments[0]);
-    if (title === null || !title.trim())
+    if (title === null || !title.trim()) {
       fail(
         call.arguments[0],
         "The test title must be a non-empty string literal."
       );
+    }
     this.testTitle = title.trim();
     const fn = call.arguments[1];
     if (fn.type !== "ArrowFunctionExpression" || !fn.async) {
@@ -253,8 +271,9 @@ class Validator {
         "The test body must be an async arrow function: async ({ page, step }) => { ... }."
       );
     }
-    if (fn.returnType || fn.typeParameters)
+    if (fn.returnType || fn.typeParameters) {
       fail(fn, "Type annotations are not allowed.");
+    }
     if (fn.params.length !== 1 || fn.params[0].type !== "ObjectPattern") {
       fail(
         fn,
@@ -262,8 +281,9 @@ class Validator {
       );
     }
     const pattern = fn.params[0];
-    if (pattern.typeAnnotation || pattern.decorators?.length)
+    if (pattern.typeAnnotation || pattern.decorators?.length) {
       fail(pattern, "Type annotations are not allowed.");
+    }
     for (const property of pattern.properties) {
       if (
         property.type !== "ObjectProperty" ||
@@ -279,35 +299,43 @@ class Validator {
         );
       }
       const name = property.key.name;
-      if (!FIXTURES.has(name))
+      if (!FIXTURES.has(name)) {
         fail(
           property,
           `Fixture "${name}" is not available; use only page, request, step, secret and cleanup.`
         );
-      if (this.fixtures.has(name))
+      }
+      if (this.fixtures.has(name)) {
         fail(property, `"${name}" is destructured twice.`);
+      }
       this.fixtures.add(name);
     }
-    if (fn.body.type !== "BlockStatement")
+    if (fn.body.type !== "BlockStatement") {
       fail(
         fn.body,
         "The test body must be a block: async ({ page, step }) => { ... }."
       );
-    if (fn.body.directives.length > 0)
+    }
+    if (fn.body.directives.length > 0) {
       fail(fn.body.directives[0], "Directives are not allowed.");
+    }
     this.scopes.push(new Set());
     this.responseScopes.push(new Set());
     for (const item of fn.body.body) {
-      if (item.type === "VariableDeclaration") this.locatorDeclaration(item);
-      else this.stepStatement(item);
+      if (item.type === "VariableDeclaration") {
+        this.locatorDeclaration(item);
+      } else {
+        this.stepStatement(item);
+      }
     }
     this.scopes.pop();
     this.responseScopes.pop();
-    if (this.steps.length === 0)
+    if (this.steps.length === 0) {
       fail(
         fn,
         'The test must contain at least one await step("Title", async () => { ... }) block.'
       );
+    }
   }
 
   private stepStatement(statement: t.Statement): void {
@@ -335,39 +363,48 @@ class Validator {
         'The test body may contain only await step("Title", async () => { ... }) blocks, one leading await cleanup(async () => { ... }) and const locator declarations. Put every action and assertion inside a named step.'
       );
     }
-    if (!this.fixtures.has("step"))
+    if (!this.fixtures.has("step")) {
       fail(
         call,
         "Destructure step from the test fixtures: async ({ page, step }) => ..."
       );
+    }
     noTypeArguments(call);
-    if (call.arguments.length !== 2)
+    if (call.arguments.length !== 2) {
       fail(call, "step() takes a title and an async function.");
+    }
     const title = staticString(call.arguments[0]);
-    if (title === null || !title.trim())
+    if (title === null || !title.trim()) {
       fail(call.arguments[0], "Step titles must be non-empty string literals.");
-    if (this.steps.length >= MAX_STEPS)
+    }
+    if (this.steps.length >= MAX_STEPS) {
       fail(call, `A Spec may have at most ${MAX_STEPS} steps.`);
+    }
     this.steps.push(title.trim());
     this.blockBody(call.arguments[1], `Step "${title.trim()}"`);
   }
 
   // cleanup() registers hidden teardown before the steps, so it also runs when a step fails.
   private cleanupStatement(call: t.CallExpression): void {
-    if (!this.fixtures.has("cleanup"))
+    if (!this.fixtures.has("cleanup")) {
       fail(
         call,
         "Destructure cleanup from the test fixtures: async ({ page, step, cleanup }) => ..."
       );
-    if (this.hasCleanup) fail(call, "A test may call cleanup() only once.");
-    if (this.steps.length > 0)
+    }
+    if (this.hasCleanup) {
+      fail(call, "A test may call cleanup() only once.");
+    }
+    if (this.steps.length > 0) {
       fail(
         call,
         "Call cleanup() before the first step so it also runs when a step fails."
       );
+    }
     noTypeArguments(call);
-    if (call.arguments.length !== 1)
+    if (call.arguments.length !== 1) {
       fail(call, "cleanup() takes one async function.");
+    }
     this.hasCleanup = true;
     this.blockBody(call.arguments[0], "cleanup()");
   }
@@ -383,18 +420,23 @@ class Validator {
         "A step body must be an async arrow function without parameters: async () => { ... }."
       );
     }
-    if (fn.returnType || fn.typeParameters)
+    if (fn.returnType || fn.typeParameters) {
       fail(fn, "Type annotations are not allowed.");
-    if (fn.body.type !== "BlockStatement")
+    }
+    if (fn.body.type !== "BlockStatement") {
       fail(fn.body, "A step body must be a block: async () => { ... }.");
-    if (fn.body.directives.length > 0)
+    }
+    if (fn.body.directives.length > 0) {
       fail(fn.body.directives[0], "Directives are not allowed.");
+    }
     this.scopes.push(new Set());
     this.responseScopes.push(new Set());
     let awaited = 0;
     for (const item of fn.body.body) {
       if (item.type === "VariableDeclaration") {
-        if (this.locatorDeclaration(item, true)) awaited += 1;
+        if (this.locatorDeclaration(item, true)) {
+          awaited += 1;
+        }
         continue;
       }
       if (
@@ -411,8 +453,9 @@ class Validator {
     }
     this.scopes.pop();
     this.responseScopes.pop();
-    if (awaited === 0)
+    if (awaited === 0) {
       fail(fn, `${label} must contain at least one action or assertion.`);
+    }
   }
 
   private isLocatorConstant(name: string): boolean {
@@ -423,32 +466,40 @@ class Validator {
     node: t.VariableDeclaration,
     inStep = false
   ): boolean {
-    if (node.kind !== "const" || node.declare)
+    if (node.kind !== "const" || node.declare) {
       fail(
         node,
         "Only const locator declarations or API response declarations are allowed."
       );
-    if (node.declarations.length !== 1)
+    }
+    if (node.declarations.length !== 1) {
       fail(node, "Declare one locator per const statement.");
+    }
     const [declarator] = node.declarations;
-    if (declarator.id.type !== "Identifier")
+    if (declarator.id.type !== "Identifier") {
       fail(declarator.id, "Destructuring is not allowed in declarations.");
+    }
     const id = declarator.id as t.Identifier & { definite?: boolean };
-    if (id.typeAnnotation || id.definite)
+    if (id.typeAnnotation || id.definite) {
       fail(id, "Type annotations are not allowed.");
-    if (RESERVED.has(id.name)) fail(id, `"${id.name}" is reserved.`);
-    if (this.isLocatorConstant(id.name) || this.isResponseConstant(id.name))
+    }
+    if (RESERVED.has(id.name)) {
+      fail(id, `"${id.name}" is reserved.`);
+    }
+    if (this.isLocatorConstant(id.name) || this.isResponseConstant(id.name)) {
       fail(id, `"${id.name}" is already declared.`);
+    }
     if (inStep && declarator.init?.type === "AwaitExpression") {
       this.requestCall(declarator.init.argument);
       this.responseScopes[this.responseScopes.length - 1].add(id.name);
       return true;
     }
-    if (!declarator.init)
+    if (!declarator.init) {
       fail(
         declarator,
         'A locator constant needs a value, like const button = page.getByRole("button").'
       );
+    }
     if (
       !["CallExpression", "Identifier", "MemberExpression"].includes(
         declarator.init.type
@@ -482,14 +533,16 @@ class Validator {
         "An API response constant must be const response = await request.get/post/put/patch/delete(...), inside a named step."
       );
     }
-    if (!this.fixtures.has("request"))
+    if (!this.fixtures.has("request")) {
       fail(node, "Destructure request from the test fixtures.");
+    }
     noTypeArguments(node);
-    if (!REQUEST_METHODS.includes(node.callee.property.name))
+    if (!REQUEST_METHODS.includes(node.callee.property.name)) {
       fail(
         node,
         "Only request.get(), post(), put(), patch() and delete() are allowed."
       );
+    }
     const target = staticString(node.arguments[0]);
     let absolute = false;
     try {
@@ -500,54 +553,64 @@ class Validator {
         !url.password &&
         !/[\\\u0000-\u001f]/.test(target ?? "");
     } catch {}
-    if (target === null || (!isSafeRelativePath(target) && !absolute))
+    if (target === null || (!isSafeRelativePath(target) && !absolute)) {
       fail(
         node.arguments[0] ?? node,
         'API requests need a literal path starting with "/" or an allowed HTTP(S) origin.'
       );
-    if (node.arguments.length > 2)
+    }
+    if (node.arguments.length > 2) {
       fail(node, "API requests take a path and an optional options object.");
+    }
     const options = node.arguments[1];
-    if (!options) return;
-    if (options.type !== "ObjectExpression")
+    if (!options) {
+      return;
+    }
+    if (options.type !== "ObjectExpression") {
       fail(
         options,
         "API options must be a literal object with headers, data or timeout."
       );
+    }
     for (const item of options.properties) {
       const key = this.apiKey(item);
       const property = item as t.ObjectProperty;
-      if (!["headers", "data", "timeout"].includes(key))
+      if (!["headers", "data", "timeout"].includes(key)) {
         fail(
           property,
           `API option "${key}" is not allowed; use headers, data or timeout.`
         );
+      }
       if (key === "headers") {
-        if (property.value.type !== "ObjectExpression")
+        if (property.value.type !== "ObjectExpression") {
           fail(property, "API headers must be a literal object.");
+        }
         for (const item of property.value.properties) {
-          if (API_ROUTING_HEADERS.has(this.apiKey(item).toLowerCase()))
+          if (API_ROUTING_HEADERS.has(this.apiKey(item).toLowerCase())) {
             fail(
               item,
               "API routing headers are controlled by the run's origin policy."
             );
+          }
           const header = item as t.ObjectProperty;
           if (
             !this.secretCall(header.value) &&
             staticString(header.value) === null
-          )
+          ) {
             fail(header.value, "Header values must be strings or secret(...).");
+          }
         }
       } else if (key === "timeout") {
         if (
           property.value.type !== "NumericLiteral" ||
           property.value.value < 1 ||
           property.value.value > 30_000
-        )
+        ) {
           fail(
             property.value,
             "API timeout must be a literal number between 1 and 30000 milliseconds."
           );
+        }
       } else {
         this.apiValue(property.value, true);
       }
@@ -560,32 +623,42 @@ class Validator {
       node.computed ||
       node.shorthand ||
       !["Identifier", "StringLiteral"].includes(node.key.type)
-    )
+    ) {
       fail(
         node,
         "API objects need literal key: value pairs, without spreads or computed keys."
       );
+    }
     const key =
       node.key.type === "Identifier"
         ? node.key.name
         : (node.key as t.StringLiteral).value;
-    if (FORBIDDEN_KEYS.has(key)) fail(node, `API key "${key}" is not allowed.`);
+    if (FORBIDDEN_KEYS.has(key)) {
+      fail(node, `API key "${key}" is not allowed.`);
+    }
     return key;
   }
 
   private apiValue(node: t.Node, secrets = false, depth = 0): void {
-    if (depth > 6) fail(node, "API values are nested too deeply.");
-    if (secrets && this.secretCall(node)) return;
+    if (depth > 6) {
+      fail(node, "API values are nested too deeply.");
+    }
+    if (secrets && this.secretCall(node)) {
+      return;
+    }
     if (
       staticString(node) !== null ||
       node.type === "NullLiteral" ||
       node.type === "BooleanLiteral" ||
       this.isNumber(node)
-    )
+    ) {
       return;
+    }
     if (node.type === "ArrayExpression") {
       for (const item of node.elements) {
-        if (!item) fail(node, "Array holes are not allowed.");
+        if (!item) {
+          fail(node, "Array holes are not allowed.");
+        }
         this.apiValue(item, secrets, depth + 1);
       }
       return;
@@ -606,26 +679,33 @@ class Validator {
   private chain(node: t.Node): ChainKind {
     if (node.type === "Identifier") {
       if (node.name === "page") {
-        if (!this.fixtures.has("page"))
+        if (!this.fixtures.has("page")) {
           fail(
             node,
             "Destructure page from the test fixtures: async ({ page, step }) => ..."
           );
+        }
         return "page";
       }
-      if (this.isLocatorConstant(node.name)) return "locator";
+      if (this.isLocatorConstant(node.name)) {
+        return "locator";
+      }
       fail(
         node,
         `"${node.name}" is not available. Specs can only use page, step, secret, expect and their own locator constants.`
       );
     }
     if (node.type === "MemberExpression") {
-      if (node.computed || node.property.type !== "Identifier")
+      if (node.computed || node.property.type !== "Identifier") {
         fail(node, "Computed property access (x[...]) is not allowed.");
+      }
       const kind = this.chain(node.object);
-      if (kind === "page" && node.property.name === "keyboard")
+      if (kind === "page" && node.property.name === "keyboard") {
         return "keyboard";
-      if (kind === "page" && node.property.name === "mouse") return "mouse";
+      }
+      if (kind === "page" && node.property.name === "mouse") {
+        return "mouse";
+      }
       fail(
         node.property,
         `Property "${node.property.name}" is not allowed; call an allowed method instead.`
@@ -634,10 +714,12 @@ class Validator {
     if (node.type === "CallExpression") {
       noTypeArguments(node);
       const callee = node.callee;
-      if (callee.type !== "MemberExpression")
+      if (callee.type !== "MemberExpression") {
         fail(node, "Only page and locator methods can be called here.");
-      if (callee.computed || callee.property.type !== "Identifier")
+      }
+      if (callee.computed || callee.property.type !== "Identifier") {
         fail(callee, "Computed property access (x[...]) is not allowed.");
+      }
       const kind = this.chain(callee.object);
       const method = callee.property.name;
       if (kind === "page" && LOCATOR_FACTORIES.includes(method)) {
@@ -649,9 +731,11 @@ class Validator {
         (LOCATOR_FACTORIES.includes(method) ||
           LOCATOR_REFINERS.includes(method))
       ) {
-        if (LOCATOR_FACTORIES.includes(method))
+        if (LOCATOR_FACTORIES.includes(method)) {
           this.locatorFactoryArgs(method, node);
-        else this.refinerArgs(method, node);
+        } else {
+          this.refinerArgs(method, node);
+        }
         return "locator";
       }
       fail(callee.property, this.unknownMethod(kind, method));
@@ -694,31 +778,38 @@ class Validator {
     if (kind === "page") {
       return `page.${method}() is not allowed. Page methods: ${list([...PAGE_ACTIONS, ...LOCATOR_FACTORIES])}, keyboard.press(), keyboard.type(), mouse.${MOUSE_ACTIONS.join("(), mouse.")}().`;
     }
-    if (kind === "keyboard")
+    if (kind === "keyboard") {
       return `page.keyboard.${method}() is not allowed; use keyboard.press() or keyboard.type().`;
-    if (kind === "mouse")
+    }
+    if (kind === "mouse") {
       return `page.mouse.${method}() is not allowed. Mouse methods: ${list(MOUSE_ACTIONS)}.`;
+    }
     return `Locator method ${method}() is not allowed. Locator methods: ${list([...LOCATOR_FACTORIES, ...LOCATOR_REFINERS, ...LOCATOR_ACTIONS])}.`;
   }
 
   private awaited(expression: t.Expression): void {
     const onlyActions =
       "Await only page/locator actions and expect(...) assertions.";
-    if (expression.type !== "CallExpression")
+    if (expression.type !== "CallExpression") {
       fail(expression, `${this.unexpected(expression)} ${onlyActions}`);
+    }
     noTypeArguments(expression);
     const callee = expression.callee;
     if (
       callee.type === "Identifier" &&
       (callee.name === "step" || callee.name === "cleanup")
-    )
+    ) {
       fail(expression, "Steps cannot be nested, and neither can cleanup().");
-    if (callee.type === "Identifier")
+    }
+    if (callee.type === "Identifier") {
       fail(callee, `"${callee.name}" is not available. ${onlyActions}`);
-    if (callee.type !== "MemberExpression")
+    }
+    if (callee.type !== "MemberExpression") {
       fail(callee, `${this.unexpected(callee)} ${onlyActions}`);
-    if (callee.computed || callee.property.type !== "Identifier")
+    }
+    if (callee.computed || callee.property.type !== "Identifier") {
       fail(callee, "Computed property access (x[...]) is not allowed.");
+    }
     const method = callee.property.name;
     const assertion = this.assertionTarget(callee.object);
     if (assertion) {
@@ -754,13 +845,22 @@ class Validator {
         }
       }
       if (assertion === "apiResponse") {
-        if (expression.arguments.length !== 0)
+        if (expression.arguments.length !== 0) {
           fail(expression, "toBeOK() takes no arguments.");
+        }
       } else if (assertion === "apiValue") {
-        if (expression.arguments.length < 1 || expression.arguments.length > 2)
+        if (
+          expression.arguments.length < 1 ||
+          expression.arguments.length > 2
+        ) {
           fail(expression, "API assertions need one or two literal arguments.");
-        for (const arg of expression.arguments) this.apiValue(arg);
-      } else this.plainArgs(expression, 0, 2);
+        }
+        for (const arg of expression.arguments) {
+          this.apiValue(arg);
+        }
+      } else {
+        this.plainArgs(expression, 0, 2);
+      }
       return;
     }
     if (
@@ -825,38 +925,48 @@ class Validator {
       }
       return null;
     }
-    if (!this.imports.has("expect"))
+    if (!this.imports.has("expect")) {
       fail(target, `Import expect from "${SPEC_MODULE}".`);
+    }
     noTypeArguments(target);
-    if (target.arguments.length !== 1)
+    if (target.arguments.length !== 1) {
       fail(
         target,
         "expect() takes exactly one argument: the page, a locator or an API response value."
       );
+    }
     const arg = target.arguments[0];
-    if (arg.type === "Identifier" && this.isResponseConstant(arg.name))
+    if (arg.type === "Identifier" && this.isResponseConstant(arg.name)) {
       return "apiResponse";
-    if (this.apiAssertionValue(arg)) return "apiValue";
+    }
+    if (this.apiAssertionValue(arg)) {
+      return "apiValue";
+    }
     const kind = this.chain(target.arguments[0]);
-    if (kind === "keyboard" || kind === "mouse")
+    if (kind === "keyboard" || kind === "mouse") {
       fail(target.arguments[0], "expect() takes the page or a locator.");
+    }
     return kind;
   }
 
   private apiAssertionValue(node: t.Node): boolean {
     if (node.type === "MemberExpression") {
-      if (!this.apiAssertionValue(node.object)) return false;
+      if (!this.apiAssertionValue(node.object)) {
+        return false;
+      }
       if (
         node.computed
           ? staticString(node.property) === null
           : node.property.type !== "Identifier"
-      )
+      ) {
         fail(node, "API response property access needs a literal key.");
+      }
       const key = node.computed
         ? staticString(node.property)!
         : (node.property as t.Identifier).name;
-      if (FORBIDDEN_KEYS.has(key))
+      if (FORBIDDEN_KEYS.has(key)) {
         fail(node, `API key "${key}" is not allowed.`);
+      }
       return true;
     }
     const awaited = node.type === "AwaitExpression";
@@ -868,41 +978,50 @@ class Validator {
       call.callee.object.type !== "Identifier" ||
       !this.isResponseConstant(call.callee.object.name) ||
       call.callee.property.type !== "Identifier"
-    )
+    ) {
       return false;
+    }
     noTypeArguments(call);
     const method = call.callee.property.name;
     if (
       call.arguments.length !== 0 ||
       !(awaited ? method === "json" : ["status", "headers"].includes(method))
-    )
+    ) {
       fail(
         call,
         "Assert response.status(), response.headers() or await response.json(), without arguments."
       );
+    }
     return true;
   }
 
   private locatorFactoryArgs(method: string, call: t.CallExpression): void {
     const [first] = call.arguments;
-    if (!first) fail(call, `${method}() needs an argument.`);
+    if (!first) {
+      fail(call, `${method}() needs an argument.`);
+    }
     if (method === "locator") {
       const selector = staticString(first);
-      if (selector === null)
+      if (selector === null) {
         fail(first, "locator() takes a selector string literal.");
-      if (selector.includes("internal:"))
+      }
+      if (selector.includes("internal:")) {
         fail(first, 'Selectors may not use Playwright "internal:" engines.');
-      if (call.arguments.length > 2)
+      }
+      if (call.arguments.length > 2) {
         fail(call, "Too many arguments (at most 2).");
-      if (call.arguments[1])
+      }
+      if (call.arguments[1]) {
         this.value(call.arguments[1], { locatorKeys: true, depth: 0 });
+      }
       return;
     } else if (method === "getByRole") {
-      if (staticString(first) === null)
+      if (staticString(first) === null) {
         fail(
           first,
           'getByRole() takes an ARIA role string, like getByRole("button", { name: "Save" }).'
         );
+      }
     } else if (staticString(first) === null && first.type !== "RegExpLiteral") {
       fail(
         first,
@@ -915,16 +1034,24 @@ class Validator {
   private refinerArgs(method: string, call: t.CallExpression): void {
     const args = call.arguments;
     if (method === "first" || method === "last") {
-      if (args.length > 0) fail(call, `${method}() takes no arguments.`);
+      if (args.length > 0) {
+        fail(call, `${method}() takes no arguments.`);
+      }
     } else if (method === "nth") {
-      if (args.length !== 1 || !this.isNumber(args[0]))
+      if (args.length !== 1 || !this.isNumber(args[0])) {
         fail(call, "nth() takes one number.");
+      }
     } else if (method === "filter") {
-      if (args.length > 1) fail(call, "filter() takes one options object.");
-      if (args[0]) this.value(args[0], { locatorKeys: true, depth: 0 });
+      if (args.length > 1) {
+        fail(call, "filter() takes one options object.");
+      }
+      if (args[0]) {
+        this.value(args[0], { locatorKeys: true, depth: 0 });
+      }
     } else {
-      if (args.length !== 1 || this.chainIsLocator(args[0]) === false)
+      if (args.length !== 1 || this.chainIsLocator(args[0]) === false) {
         fail(call, `${method}() takes one locator.`);
+      }
     }
   }
 
@@ -950,24 +1077,27 @@ class Validator {
     if (kind === "mouse") {
       const coordinates = MOUSE_COORDINATES[method];
       const max = method === "wheel" ? 2 : coordinates + 1;
-      if (args.length < coordinates || args.length > max)
+      if (args.length < coordinates || args.length > max) {
         fail(
           call,
           `page.mouse.${method}() takes ${coordinates ? `${coordinates} literal numbers` : "no coordinates"}${method === "wheel" ? "" : " and an optional options object"}.`
         );
+      }
       for (const arg of args.slice(0, coordinates)) {
-        if (!this.isNumber(arg))
+        if (!this.isNumber(arg)) {
           fail(
             arg,
             `page.mouse.${method}() coordinates must be literal numbers.`
           );
+        }
       }
       const options = args[coordinates];
-      if (options && options.type !== "ObjectExpression")
+      if (options && options.type !== "ObjectExpression") {
         fail(
           options,
           `page.mouse.${method}() options must be a literal object, like { steps: 10 } or { button: "left" }.`
         );
+      }
       this.plainArgs(call, coordinates, max);
       return;
     }
@@ -978,11 +1108,12 @@ class Validator {
           args[0].type
         ) ||
         !this.chainIsLocator(args[0])
-      )
+      ) {
         fail(
           args[0] ?? call,
           'dragTo() takes the target locator, like dragTo(page.getByText("Done")).'
         );
+      }
       this.plainArgs(call, 1, 2);
       return;
     }
@@ -999,7 +1130,9 @@ class Validator {
     }
     if (TEXT_METHODS.has(method)) {
       const [text] = args;
-      if (!text) fail(call, `${method}() needs the text to enter.`);
+      if (!text) {
+        fail(call, `${method}() needs the text to enter.`);
+      }
       if (!this.secretCall(text) && staticString(text) === null) {
         fail(
           text,
@@ -1010,16 +1143,20 @@ class Validator {
       return;
     }
     if ((method === "press" && kind !== "page") || method === "setChecked") {
-      if (!args[0]) fail(call, `${method}() needs an argument.`);
+      if (!args[0]) {
+        fail(call, `${method}() needs an argument.`);
+      }
     }
     this.plainArgs(call, 0, 2);
   }
 
   private plainArgs(call: t.CallExpression, from: number, max: number): void {
-    if (call.arguments.length > max)
+    if (call.arguments.length > max) {
       fail(call, `Too many arguments (at most ${max}).`);
-    for (const arg of call.arguments.slice(from))
+    }
+    for (const arg of call.arguments.slice(from)) {
       this.value(arg, { locatorKeys: false, depth: 0 });
+    }
   }
 
   private secretCall(node: t.Node): boolean {
@@ -1027,13 +1164,15 @@ class Validator {
       node.type !== "CallExpression" ||
       node.callee.type !== "Identifier" ||
       node.callee.name !== "secret"
-    )
+    ) {
       return false;
-    if (!this.fixtures.has("secret"))
+    }
+    if (!this.fixtures.has("secret")) {
       fail(
         node,
         "Destructure secret from the test fixtures: async ({ page, step, secret }) => ..."
       );
+    }
     noTypeArguments(node);
     const [profile, field] = node.arguments.map((arg) => staticString(arg));
     if (
@@ -1057,19 +1196,25 @@ class Validator {
     node: t.Node,
     options: { locatorKeys: boolean; depth: number }
   ): void {
-    if (node.type === "SpreadElement" || node.type === "ArgumentPlaceholder")
+    if (node.type === "SpreadElement" || node.type === "ArgumentPlaceholder") {
       fail(node, "Spread arguments are not allowed.");
-    if (staticString(node) !== null) return;
+    }
+    if (staticString(node) !== null) {
+      return;
+    }
     switch (node.type) {
       case "NumericLiteral":
       case "BooleanLiteral":
         return;
       case "RegExpLiteral":
-        if (/[^dgimsuy]/.test(node.flags))
+        if (/[^dgimsuy]/.test(node.flags)) {
           fail(node, "Unsupported regular expression flags.");
+        }
         return;
       case "UnaryExpression":
-        if (this.isNumber(node)) return;
+        if (this.isNumber(node)) {
+          return;
+        }
         break;
       case "TemplateLiteral":
         fail(node, "Template literals cannot contain ${...} expressions.");
@@ -1085,14 +1230,20 @@ class Validator {
         }
         break;
       case "ArrayExpression":
-        if (options.depth > 1) fail(node, "Values are nested too deeply.");
+        if (options.depth > 1) {
+          fail(node, "Values are nested too deeply.");
+        }
         for (const element of node.elements) {
-          if (!element) fail(node, "Array holes are not allowed.");
+          if (!element) {
+            fail(node, "Array holes are not allowed.");
+          }
           this.value(element, { locatorKeys: false, depth: options.depth + 1 });
         }
         return;
       case "ObjectExpression":
-        if (options.depth > 1) fail(node, "Values are nested too deeply.");
+        if (options.depth > 1) {
+          fail(node, "Values are nested too deeply.");
+        }
         for (const property of node.properties) {
           if (
             property.type !== "ObjectProperty" ||
@@ -1106,11 +1257,13 @@ class Validator {
             );
           }
           const key = property.key.name;
-          if (FORBIDDEN_KEYS.has(key))
+          if (FORBIDDEN_KEYS.has(key)) {
             fail(property.key, `Option "${key}" is not allowed.`);
+          }
           if (options.locatorKeys && (key === "has" || key === "hasNot")) {
-            if (!this.chainIsLocator(property.value))
+            if (!this.chainIsLocator(property.value)) {
               fail(property.value, `${key} takes a locator.`);
+            }
             continue;
           }
           this.value(property.value, {
@@ -1129,10 +1282,12 @@ class Validator {
   }
 
   private unexpectedValue(node: t.Node): string {
-    if (node.type === "Identifier")
+    if (node.type === "Identifier") {
       return `"${node.name}" cannot be used as a value.`;
-    if (node.type === "MemberExpression" || node.type === "CallExpression")
+    }
+    if (node.type === "MemberExpression" || node.type === "CallExpression") {
       return "Expressions cannot be used as values.";
+    }
     return this.unexpected(node);
   }
 }
@@ -1167,10 +1322,11 @@ export function analyzeSpecSource(
   source: string
 ): { ok: true; analysis: SpecAnalysis } | { ok: false; error: string } {
   try {
-    if (source.length > MAX_SOURCE_CHARS)
+    if (source.length > MAX_SOURCE_CHARS) {
       throw new SpecSourceError(
         `spec.ts is larger than ${MAX_SOURCE_CHARS} characters.`
       );
+    }
     const validator = new Validator();
     validator.run(parseSource(source));
     return {
@@ -1184,8 +1340,9 @@ export function analyzeSpecSource(
       },
     };
   } catch (error) {
-    if (error instanceof SpecSourceError)
+    if (error instanceof SpecSourceError) {
       return { ok: false, error: error.message };
+    }
     throw error;
   }
 }
@@ -1215,7 +1372,9 @@ export function stepTitlesError(
   const mismatch = expected.findIndex(
     (title, index) => comparable(title) !== comparable(stepTitles[index] ?? "")
   );
-  if (mismatch < 0 && expected.length === stepTitles.length) return null;
+  if (mismatch < 0 && expected.length === stepTitles.length) {
+    return null;
+  }
   const index = mismatch < 0 ? expected.length : mismatch;
   const detail =
     index < expected.length
@@ -1231,10 +1390,14 @@ export function validateSpecSource(
   humanSpec?: HumanSpec | null
 ): SpecSourceValidation {
   const result = analyzeSpecSource(source);
-  if (!result.ok) return result;
+  if (!result.ok) {
+    return result;
+  }
   if (humanSpec) {
     const error = stepTitlesError(result.analysis.steps, humanSpec);
-    if (error) return { ok: false, error };
+    if (error) {
+      return { ok: false, error };
+    }
   }
   return { ok: true };
 }

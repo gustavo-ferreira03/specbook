@@ -58,8 +58,9 @@ export function createCredentialsRouter(): Hono {
 
   router.get("/projects/:id/credentials", access("viewer"), async (c) => {
     const project = await projectsRepository.getProject(c.req.param("id"));
-    if (!project)
+    if (!project) {
       throw new HTTPException(404, { message: "Project not found" });
+    }
     return c.json({ profiles: await listPublicProfiles(project.id) });
   });
 
@@ -69,8 +70,9 @@ export function createCredentialsRouter(): Hono {
     zValidator("json", createSchema),
     async (c) => {
       const project = await projectsRepository.getProject(c.req.param("id"));
-      if (!project)
+      if (!project) {
         throw new HTTPException(404, { message: "Project not found" });
+      }
       const profile = await createProfile(
         project.id,
         c.req.valid("json")
@@ -85,10 +87,11 @@ export function createCredentialsRouter(): Hono {
     zValidator("json", updateSchema),
     async (c) => {
       const row = await credentialsRepository.getProfile(c.req.param("id"));
-      if (!row)
+      if (!row) {
         throw new HTTPException(404, {
           message: "Credential profile not found",
         });
+      }
       const profile = await updateProfile(row, c.req.valid("json")).catch(
         mapDomainError
       );
@@ -98,8 +101,9 @@ export function createCredentialsRouter(): Hono {
 
   router.delete("/credentials/:id", access("editor"), async (c) => {
     const row = await credentialsRepository.getProfile(c.req.param("id"));
-    if (!row)
+    if (!row) {
       throw new HTTPException(404, { message: "Credential profile not found" });
+    }
     await deleteProfile(row);
     return c.body(null, 204);
   });

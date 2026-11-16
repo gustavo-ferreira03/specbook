@@ -28,11 +28,15 @@ export async function authenticateCiToken(
   const candidate = authorization?.match(
     /^Bearer (sbci_[A-Za-z0-9_-]{43})$/
   )?.[1];
-  if (!candidate) return false;
-  const row = await ciRepository.token(projectId);
-  if (!row?.tokenHash || !verifyTokenHash(row.tokenHash, candidate))
+  if (!candidate) {
     return false;
-  if (!row.lastUsedAt || Date.now() - Date.parse(row.lastUsedAt) >= 60_000)
+  }
+  const row = await ciRepository.token(projectId);
+  if (!row?.tokenHash || !verifyTokenHash(row.tokenHash, candidate)) {
+    return false;
+  }
+  if (!row.lastUsedAt || Date.now() - Date.parse(row.lastUsedAt) >= 60_000) {
     await ciRepository.touchToken(projectId, row.tokenHash);
+  }
   return true;
 }

@@ -108,7 +108,9 @@ function escape(value: string): string {
 }
 
 function duration(ms: number | null | undefined): string {
-  if (ms == null) return "";
+  if (ms == null) {
+    return "";
+  }
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
 }
 
@@ -118,11 +120,17 @@ async function embed(
   type: string | undefined,
   maxBytes: number
 ): Promise<string | null> {
-  if (!type) return null;
+  if (!type) {
+    return null;
+  }
   const source = path.join(directory, file);
-  if (!source.startsWith(directory + path.sep)) return null;
+  if (!source.startsWith(directory + path.sep)) {
+    return null;
+  }
   const stat = await fs.stat(source).catch(() => null);
-  if (!stat?.isFile() || stat.size > maxBytes) return null;
+  if (!stat?.isFile() || stat.size > maxBytes) {
+    return null;
+  }
   return `data:${type};base64,${(await fs.readFile(source)).toString("base64")}`;
 }
 
@@ -142,10 +150,15 @@ async function replayData(directory: string): Promise<string | null> {
 }
 
 function toneOf(item: Item): Tone {
-  if (item.pending) return "running";
-  if (item.awaitingDeploy) return "waiting";
-  if (["failed", "error"].includes(item.status))
+  if (item.pending) {
+    return "running";
+  }
+  if (item.awaitingDeploy) {
+    return "waiting";
+  }
+  if (["failed", "error"].includes(item.status)) {
     return item.knownBug ? "known" : "failed";
+  }
   return item.flaky ? "flaky" : "passed";
 }
 
@@ -314,7 +327,9 @@ function filter(
 }
 
 function stateLabel(item: Item, tone: Tone): string {
-  if (tone === "failed") return item.status === "error" ? "Error" : "Failed";
+  if (tone === "failed") {
+    return item.status === "error" ? "Error" : "Failed";
+  }
   return (
     {
       known: "Known bug",
@@ -540,11 +555,12 @@ export async function renderHtmlReport(
     script.replace(/<\/script/gi, "<\\/script");
   const results = sections.map((section) => section.item);
   const byFeature = new Map<string, ReportSection[]>();
-  for (const entry of sections)
+  for (const entry of sections) {
     byFeature.set(entry.feature, [
       ...(byFeature.get(entry.feature) ?? []),
       entry,
     ]);
+  }
   const groups = [...byFeature]
     .map(([name, entries]) => ({
       name,

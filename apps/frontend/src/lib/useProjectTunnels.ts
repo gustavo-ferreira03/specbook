@@ -26,7 +26,9 @@ export function useProjectTunnels(projectId: string): {
         }
       })
       .catch((reason) => {
-        if (!isAbortError(reason)) setError(errorMessage(reason));
+        if (!isAbortError(reason)) {
+          setError(errorMessage(reason));
+        }
       });
   }, [projectId]);
   useEffect(() => {
@@ -38,7 +40,9 @@ export function useProjectTunnels(projectId: string): {
   useEffect(
     () =>
       onInvalidate((event) => {
-        if (matchesInvalidation(event, "projects", projectId)) refresh();
+        if (matchesInvalidation(event, "projects", projectId)) {
+          refresh();
+        }
       }),
     [projectId, refresh]
   );

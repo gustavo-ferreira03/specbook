@@ -22,9 +22,12 @@ export async function resolveCredentialProfile(
   const profile = overrideId
     ? await credentialsRepository.getProfile(overrideId)
     : await getProfileByName(projectId, name);
-  if (!profile) return `no vault item or credential profile named "${name}".`;
-  if (profile.projectId !== projectId)
+  if (!profile) {
+    return `no vault item or credential profile named "${name}".`;
+  }
+  if (profile.projectId !== projectId) {
     return "the overridden profile does not belong to this project.";
+  }
   const base = new URL(
     overrideId ? environment!.configuredBaseUrl : productionBaseUrl
   ).origin;

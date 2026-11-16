@@ -53,7 +53,9 @@ const isChatCommand =
   process.argv.slice(2).find((argument) => !argument.startsWith("-")) ===
   "chat";
 stdout.on("error", (error: NodeJS.ErrnoException) => {
-  if (error.code === "EPIPE") process.exit(0);
+  if (error.code === "EPIPE") {
+    process.exit(0);
+  }
   throw error;
 });
 const interactive = !json && !!stdin.isTTY && !!stderr.isTTY;
@@ -77,7 +79,9 @@ async function working<T>(
   task: (spinner?: ReturnType<typeof clack.spinner>) => Promise<T>,
   indicator: "dots" | "timer" = "dots"
 ): Promise<T> {
-  if (!interactive) return task();
+  if (!interactive) {
+    return task();
+  }
   const spinner = clack.spinner({
     output: stderr,
     withGuide: false,
@@ -116,7 +120,9 @@ async function credentialInput(): Promise<{
   let body = "";
   for await (const chunk of stdin) {
     body += chunk.toString();
-    if (body.length > 100_000) throw new Error("Credential input is too large");
+    if (body.length > 100_000) {
+      throw new Error("Credential input is too large");
+    }
   }
   let data: unknown;
   try {
@@ -131,20 +137,24 @@ async function credentialInput(): Promise<{
     })
     .strict()
     .safeParse(data);
-  if (wrapped.success) return wrapped.data;
+  if (wrapped.success) {
+    return wrapped.data;
+  }
   const flat = z.record(z.string(), z.string()).safeParse(data);
-  if (!flat.success)
+  if (!flat.success) {
     throw new Error(
       "Credential JSON must contain string fields, or {fields:{...},origins:[...]}"
     );
+  }
   return { fields: flat.data };
 }
 
 async function promptCredentials(name: string | undefined) {
-  if (!interactive)
+  if (!interactive) {
     throw new Error(
       "Use --stdin-json to provide credentials non-interactively"
     );
+  }
   clack.intro(pc.inverse(" specbook credentials "), { output: stderr });
   const profile =
     name ??
@@ -174,10 +184,11 @@ async function promptCredentials(name: string | undefined) {
     .map((field) => field.trim())
     .filter(Boolean);
   const fields: Record<string, string> = {};
-  for (const field of names)
+  for (const field of names) {
     fields[field] = answer(
       await clack.password({ message: field, output: stderr })
     );
+  }
   const sensitive = answer(
     await clack.multiselect({
       message: "Sensitive fields (hidden in evidence)",
@@ -197,8 +208,9 @@ function exitWith(reply: ChatReply) {
   if (
     reply.status === "failed" ||
     reply.specs?.some((spec) => spec.status !== "passed")
-  )
+  ) {
     process.exitCode = 1;
+  }
 }
 
 const program = new Command("specbook")
@@ -239,7 +251,9 @@ const program = new Command("specbook")
   })
   .configureOutput({
     writeErr: (text) => {
-      if (!json) stderr.write(scrubCi(redactTokens(text)));
+      if (!json) {
+        stderr.write(scrubCi(redactTokens(text)));
+      }
     },
     outputError: (text, write) =>
       write(ui.failure(text.replace(/^error: /, "")) + "\n"),
@@ -292,8 +306,9 @@ ${pc.bold("Examples")}
       process.once("SIGINT", () => abort.abort(new Error("Cancelled")));
       process.once("SIGTERM", () => abort.abort(new Error("Cancelled")));
       const timeout = Number(options.timeout);
-      if (!Number.isFinite(timeout) || timeout <= 0)
+      if (!Number.isFinite(timeout) || timeout <= 0) {
         throw new Error("Use a positive --timeout in seconds");
+      }
       const send = () =>
         sendMessage(workspace, args, {
           agent: options.agent,
@@ -336,7 +351,9 @@ program
     let baseUrl = options.baseUrl;
     let agent = options.agent ?? agents[0];
     if (!baseUrl) {
-      if (!interactive) needsInteractive("The base URL is required.");
+      if (!interactive) {
+        needsInteractive("The base URL is required.");
+      }
       clack.intro(pc.inverse(" specbook init "), { output: stderr });
       baseUrl = answer(
         await clack.text({
@@ -384,14 +401,17 @@ program
     if (options.stdin) {
       for await (const chunk of stdin) {
         token += chunk.toString();
-        if (token.length > 4096) throw new Error("Token input is too large");
+        if (token.length > 4096) {
+          throw new Error("Token input is too large");
+        }
       }
       token = token.trim();
     } else {
-      if (!interactive)
+      if (!interactive) {
         throw new Error(
           "Use --stdin to provide a personal access token non-interactively"
         );
+      }
       token = answer(
         await clack.password({
           message: "Personal access token",
@@ -441,13 +461,15 @@ program
       const { server, projects } = await working("Loading projects", () =>
         connectionChoices(options.server)
       );
-      if (!projects.length)
+      if (!projects.length) {
         throw new Error("No projects are available to this user");
+      }
       if (!selected) {
-        if (!interactive)
+        if (!interactive) {
           throw new Error(
             "Provide a project id or name when running non-interactively"
           );
+        }
         selected = answer(
           await clack.select({
             message: "Connect to which project?",
@@ -465,12 +487,13 @@ program
           project.id === selected ||
           project.name.toLowerCase() === selected!.toLowerCase()
       );
-      if (matches.length !== 1)
+      if (matches.length !== 1) {
         throw new Error(
           matches.length
             ? "Project name is ambiguous; use its id"
             : "Project not found or access denied"
         );
+      }
       const project = matches[0]!;
       const environments = await environmentChoices(server, project.id);
       const name = options.environment ?? "Production";
@@ -478,10 +501,11 @@ program
         (entry) =>
           entry.id === name || entry.name.toLowerCase() === name.toLowerCase()
       );
-      if (!environment)
+      if (!environment) {
         throw new Error(
           "Environment not found; use --environment with an existing name or id"
         );
+      }
       const result = await connect(workspace, server, project, environment);
       await print(result, () => ui.renderConnect(result));
     }
@@ -495,7 +519,9 @@ program
     const result = await working("Pulling remote Specs", async () =>
       pull(await workspaceDirectory())
     );
-    if (result.conflicts.length) process.exitCode = 1;
+    if (result.conflicts.length) {
+      process.exitCode = 1;
+    }
     await print(result, () => ui.renderPull(result));
   });
 
@@ -561,7 +587,9 @@ program
       () => runCi(options),
       "timer"
     );
-    if (!result.qualityGate.passed) process.exitCode = 1;
+    if (!result.qualityGate.passed) {
+      process.exitCode = 1;
+    }
     await print(result, () => ui.renderCi(result));
   });
 
@@ -604,13 +632,16 @@ program
       secretsCommand?: string;
     }) => {
       const url = options.url ?? options.server ?? process.env.SPECBOOK_URL;
-      if (!url) throw new Error("SPECBOOK_URL or --url is required");
+      if (!url) {
+        throw new Error("SPECBOOK_URL or --url is required");
+      }
       let token = process.env.SPECBOOK_RUNNER_TOKEN;
       if (!token) {
-        if (!interactive)
+        if (!interactive) {
           throw new Error(
             "Set SPECBOOK_RUNNER_TOKEN when running non-interactively"
           );
+        }
         token = answer(
           await clack.password({ message: "Runner token", output: stderr })
         );
@@ -688,16 +719,20 @@ program
       allowOrigin: string[];
     }) => {
       const url = options.url ?? options.server ?? process.env.SPECBOOK_URL;
-      if (!url) throw new Error("SPECBOOK_URL or --url is required");
+      if (!url) {
+        throw new Error("SPECBOOK_URL or --url is required");
+      }
       const project = options.project ?? process.env.SPECBOOK_PROJECT;
-      if (!project || !z.string().uuid().safeParse(project).success)
+      if (!project || !z.string().uuid().safeParse(project).success) {
         throw new Error("SPECBOOK_PROJECT or --project must be a project id");
+      }
       let token = process.env.SPECBOOK_RUNNER_TOKEN;
       if (!token) {
-        if (!interactive)
+        if (!interactive) {
           throw new Error(
             "Set SPECBOOK_RUNNER_TOKEN when running non-interactively"
           );
+        }
         token = answer(
           await clack.password({ message: "Tunnel token", output: stderr })
         );
@@ -763,9 +798,12 @@ program
           { ...options, signal: abort.signal },
           (event) =>
             print(event, () => {
-              if (event.event === "downloading_ui")
+              if (event.event === "downloading_ui") {
                 return `${pc.cyan("●")} Downloading the web UI for Specbook ${event.version}`;
-              if (event.event === "stopped") return pc.dim("Specbook stopped");
+              }
+              if (event.event === "stopped") {
+                return pc.dim("Specbook stopped");
+              }
               return `${ui.success("Specbook is ready")}\n${pc.cyan(event.url)}\n${pc.dim(`Storage: ${event.data}`)}`;
             }),
           (line) => stderr.write(line + "\n")
@@ -804,7 +842,9 @@ spec
     const result = await working("Checking Specs", () =>
       checkSpecs(workspace, selector)
     );
-    if (!result.ok) process.exitCode = 1;
+    if (!result.ok) {
+      process.exitCode = 1;
+    }
     await print(result, () => ui.renderCheck(result));
   });
 
@@ -823,7 +863,9 @@ program
       () => runLocal(workspace, selector, { signal: abort.signal }),
       "timer"
     );
-    if (run.status !== "passed") process.exitCode = 1;
+    if (run.status !== "passed") {
+      process.exitCode = 1;
+    }
     await print(run, () => ui.renderRun(run));
   });
 
@@ -863,7 +905,9 @@ credentials
         sensitive?: string[];
       };
       if (options.stdinJson) {
-        if (!profile) throw new Error("Provide the profile name");
+        if (!profile) {
+          throw new Error("Provide the profile name");
+        }
         input = await credentialInput();
       } else {
         const prompted = await promptCredentials(name);
@@ -971,11 +1015,15 @@ hideHelpCommand(program);
 
 async function main(): Promise<void> {
   const raw = process.argv.slice(2);
-  if (raw[0] === "--browse-daemon")
+  if (raw[0] === "--browse-daemon") {
     return startBrowserDaemon(raw[1]!, raw[2]!, raw.includes("--headed"));
-  if (raw[0] === "--mcp") return runMcpServer(raw[1]!, raw[2]!);
-  if (raw[0] === "--chat-worker")
+  }
+  if (raw[0] === "--mcp") {
+    return runMcpServer(raw[1]!, raw[2]!);
+  }
+  if (raw[0] === "--chat-worker") {
     return runChatWorker(raw[1]!, raw[2]!, raw[3]!);
+  }
   if (
     json &&
     (raw.includes("--help") ||
@@ -1009,8 +1057,9 @@ main().catch(async (error) => {
         "commander.version",
         "commander.help",
       ].includes(error.code)
-    )
+    ) {
       return;
+    }
     process.exitCode = error.exitCode || 1;
     if (json) {
       const message = error.message.replace(/^error: /, "");
@@ -1066,6 +1115,8 @@ main().catch(async (error) => {
         )
       ) + "\n"
     );
-  } else stderr.write(ui.failure(safe) + "\n");
+  } else {
+    stderr.write(ui.failure(safe) + "\n");
+  }
   process.exitCode = 1;
 });

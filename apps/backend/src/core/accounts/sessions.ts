@@ -114,10 +114,14 @@ export async function watchSession(
     return () => {};
   }
   const userChanged = (id: string) => {
-    if (id === initial.user.id) close();
+    if (id === initial.user.id) {
+      close();
+    }
   };
   const revoked = (hash: string) => {
-    if (hash === initial.session.tokenHash) close();
+    if (hash === initial.session.tokenHash) {
+      close();
+    }
   };
   authEvents.on("user", userChanged);
   authEvents.on("session", revoked);
@@ -132,7 +136,9 @@ export async function watchSession(
     authEvents.off("session", revoked);
   };
   try {
-    if (!(await sessionFromHeaders(headers))) close();
+    if (!(await sessionFromHeaders(headers))) {
+      close();
+    }
   } catch {
     close();
   }

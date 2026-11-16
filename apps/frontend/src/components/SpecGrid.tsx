@@ -14,7 +14,9 @@ export function SpecGrid({
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const node = ref.current;
-    if (!node) return;
+    if (!node) {
+      return;
+    }
     let frame = 0;
     const move = (event: PointerEvent) => {
       cancelAnimationFrame(frame);

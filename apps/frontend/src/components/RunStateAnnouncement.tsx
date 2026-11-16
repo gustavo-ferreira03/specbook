@@ -93,8 +93,9 @@ export function RunStateAnnouncement({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const { announce, remove } = useContext(RunAnnouncementContext);
   useEffect(() => {
-    if (message && hostRef.current)
+    if (message && hostRef.current) {
       announce(id, message, priority, hostRef.current);
+    }
     return () => remove(id);
   }, [announce, remove, id, message, priority]);
   return <div ref={hostRef} className="contents" />;

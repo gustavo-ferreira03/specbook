@@ -2,7 +2,7 @@ import { packReplayEvents, type ReplayRecording } from "./replay-assets.ts";
 import { readReplay, type ReplayEvent } from "./replay.ts";
 
 export function offlineReplay(value: unknown): unknown {
-  if (typeof value === "string")
+  if (typeof value === "string") {
     return value
       .replace(/@import\s+(?:url\([^)]*\)|["'][^"']*["'])[^;]*;?/gi, "")
       .replace(/url\(\s*(["']?)(.*?)\1\s*\)/gi, (_match, _quote, url: string) =>
@@ -10,8 +10,13 @@ export function offlineReplay(value: unknown): unknown {
           ? `url("${url.trim().replace(/"/g, "%22")}")`
           : 'url("data:,")'
       );
-  if (Array.isArray(value)) return value.map(offlineReplay);
-  if (!value || typeof value !== "object") return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(offlineReplay);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
   const entry = value as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(entry)) {
@@ -41,19 +46,24 @@ export function offlineReplay(value: unknown): unknown {
             name !== "srcset" &&
             typeof attribute === "string" &&
             /^data:(?:image|font|audio|video)\//i.test(attribute)
-          )
+          ) {
             attributes[name] = attribute;
+          }
         } else if (name === "href") {
-          if (typeof attribute === "string" && attribute.startsWith("#"))
+          if (typeof attribute === "string" && attribute.startsWith("#")) {
             attributes[name] = attribute;
+          }
         } else if (
           !name.toLowerCase().startsWith("on") &&
           name !== "http-equiv"
-        )
+        ) {
           attributes[name] = offlineReplay(attribute);
+        }
       }
       result[key] = attributes;
-    } else result[key] = offlineReplay(item);
+    } else {
+      result[key] = offlineReplay(item);
+    }
   }
   return result;
 }

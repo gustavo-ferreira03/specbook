@@ -52,7 +52,9 @@ const suggestions = [
 ];
 
 function initialText(specId: string | null, intent: string | null): string {
-  if (!specId) return "";
+  if (!specId) {
+    return "";
+  }
   return intent === "repair"
     ? `Repair the executable check for Spec ${specId}, keeping its saved steps and expected result unchanged. `
     : `I want to change the Spec ${specId}. `;
@@ -79,7 +81,9 @@ function NewChatContent({ projectId }: { projectId: string }) {
         .catch(() => setModelReady(null));
     check();
     return onInvalidate((event) => {
-      if (!event.resource || event.resource === "settings") check();
+      if (!event.resource || event.resource === "settings") {
+        check();
+      }
     });
   }, []);
 
@@ -89,7 +93,9 @@ function NewChatContent({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     const textarea = textareaRef.current;
-    if (!textarea) return;
+    if (!textarea) {
+      return;
+    }
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
   }, [text]);
@@ -102,7 +108,9 @@ function NewChatContent({ projectId }: { projectId: string }) {
   async function send(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = text.trim();
-    if (!value || sending) return;
+    if (!value || sending) {
+      return;
+    }
     setSending(true);
     setSendError("");
     try {
@@ -114,13 +122,14 @@ function NewChatContent({ projectId }: { projectId: string }) {
     }
   }
 
-  if (!canEdit)
+  if (!canEdit) {
     return (
       <EmptyState
         title="Chats are read-only"
         description="Ask an editor to start a conversation or change a Spec."
       />
     );
+  }
 
   return (
     <div className="bg-surface flex h-full min-h-0 flex-col">

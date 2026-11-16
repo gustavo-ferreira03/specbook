@@ -41,8 +41,9 @@ async function executable(name: string): Promise<void> {
         () => true,
         () => false
       )
-    )
+    ) {
       return;
+    }
   }
   throw new Error(`${name} is unavailable`);
 }
@@ -75,8 +76,9 @@ export async function systemStatus() {
         try {
           const file = path.join(directory, "check");
           await fs.writeFile(file, "ready");
-          if ((await fs.readFile(file, "utf8")) !== "ready")
+          if ((await fs.readFile(file, "utf8")) !== "ready") {
             throw new Error("Storage read failed");
+          }
         } finally {
           await fs.rm(directory, { recursive: true, force: true });
         }

@@ -46,11 +46,15 @@ function ProjectPause({ projectId }: { projectId: string }) {
           setGloballyPaused(value.globallyPaused);
         })
         .catch((error) => {
-          if (!isAbortError(error)) setError(errorMessage(error));
+          if (!isAbortError(error)) {
+            setError(errorMessage(error));
+          }
         });
     void load();
     const unsubscribe = onInvalidate((event) => {
-      if (event.resource === "settings") void load();
+      if (event.resource === "settings") {
+        void load();
+      }
     });
     return () => {
       controller.abort();
@@ -124,7 +128,9 @@ export function ChatSettingsDialog({
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) {
+          onClose();
+        }
       }}
     >
       <DialogContent className="sm:max-w-reading max-h-[90dvh] overflow-y-auto">

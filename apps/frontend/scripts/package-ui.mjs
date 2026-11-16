@@ -37,16 +37,19 @@ try {
           )
         : [name];
       for (const packageName of names) {
-        if (packageName.startsWith(".")) continue;
+        if (packageName.startsWith(".")) {
+          continue;
+        }
         const source = path.join(dependencies, packageName);
         const dependency = JSON.parse(
           await fs.readFile(path.join(source, "package.json"), "utf8")
         );
         const previous = packages.get(packageName);
-        if (previous && previous !== dependency.version)
+        if (previous && previous !== dependency.version) {
           throw new Error(
             `Conflicting standalone versions of ${packageName}: ${previous} and ${dependency.version}`
           );
+        }
         if (!previous) {
           packages.set(packageName, dependency.version);
           await fs.cp(source, path.join(staging, "node_modules", packageName), {
@@ -94,7 +97,9 @@ try {
     );
   });
   const checksum = createHash("sha256");
-  for await (const chunk of createReadStream(artifact)) checksum.update(chunk);
+  for await (const chunk of createReadStream(artifact)) {
+    checksum.update(chunk);
+  }
   await fs.writeFile(
     `${artifact}.sha256`,
     `${checksum.digest("hex")}  ${filename}\n`

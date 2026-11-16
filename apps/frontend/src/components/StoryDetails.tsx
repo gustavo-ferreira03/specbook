@@ -17,7 +17,9 @@ export function StoryTimeline({
   const timeline = story.timeline
     .filter((event) => !omit.includes(event.detail))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  if (!timeline.length) return null;
+  if (!timeline.length) {
+    return null;
+  }
   return (
     <ol
       className="border-line space-y-4 border-l pl-4"

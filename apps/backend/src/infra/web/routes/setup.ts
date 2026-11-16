@@ -20,7 +20,9 @@ export function createSetupRouter(): Hono {
 
   router.get("/setup/status", access("public"), async (c) => {
     const needsAdmin = !(await accountsRepository.hasUsers());
-    if (!c.get("user")) return c.json({ needsAdmin, authenticated: false });
+    if (!c.get("user")) {
+      return c.json({ needsAdmin, authenticated: false });
+    }
     const [model, projects] = await Promise.all([
       configuredModel(),
       projectsRepository.listProjects(),

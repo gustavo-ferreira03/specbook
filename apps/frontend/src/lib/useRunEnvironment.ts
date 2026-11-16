@@ -39,9 +39,11 @@ export function useRunEnvironment(
   const setEnvironment = useCallback(
     (next: string) => {
       try {
-        if (next === DEFAULT_ENVIRONMENT)
+        if (next === DEFAULT_ENVIRONMENT) {
           window.localStorage.removeItem(storageKey(projectId));
-        else window.localStorage.setItem(storageKey(projectId), next);
+        } else {
+          window.localStorage.setItem(storageKey(projectId), next);
+        }
       } catch {}
       window.dispatchEvent(new Event(CHANGE_EVENT));
     },

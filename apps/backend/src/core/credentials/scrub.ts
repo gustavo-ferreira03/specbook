@@ -19,7 +19,9 @@ export function createSecretScrubber(
 ): (text: string) => string {
   const needles = new Set<string>();
   for (const value of values) {
-    if (value.length === 0) continue;
+    if (value.length === 0) {
+      continue;
+    }
     needles.add(value);
     needles.add(encodeURIComponent(value));
     needles.add(xmlEscaped(value, false));
@@ -46,10 +48,13 @@ export function registerTransientSecret(
 
 function liveTransientSecrets(projectId: string): string[] {
   const values = transientSecrets.get(projectId);
-  if (!values) return [];
+  if (!values) {
+    return [];
+  }
   const now = Date.now();
-  for (const [value, expiresAt] of values)
+  for (const [value, expiresAt] of values) {
     if (expiresAt < now) values.delete(value);
+  }
   return [...values.keys()];
 }
 

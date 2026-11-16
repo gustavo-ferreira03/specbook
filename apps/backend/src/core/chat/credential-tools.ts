@@ -126,7 +126,9 @@ function handleFor(label: string, origin: string): string {
 
 function evaluationResult(output: string): unknown {
   const section = output.match(/### Result\s*\n([\s\S]*?)(?:\n### |$)/);
-  if (!section) return null;
+  if (!section) {
+    return null;
+  }
   try {
     return JSON.parse(section[1].trim());
   } catch {
@@ -141,8 +143,9 @@ const recentVaultFills = new WeakMap<
 
 export function consumeVaultSubmit(mcp: BrowserMcp, origin: string): boolean {
   const fill = recentVaultFills.get(mcp);
-  if (!fill || fill.origin !== origin || Date.now() - fill.at > 120_000)
+  if (!fill || fill.origin !== origin || Date.now() - fill.at > 120_000) {
     return false;
+  }
   recentVaultFills.delete(mcp);
   return true;
 }
@@ -175,9 +178,13 @@ export function createCredentialTools(options: CredentialToolOptions) {
   }
 
   async function activeOrigin(signal?: AbortSignal): Promise<string | null> {
-    if (!options.mcp) return null;
+    if (!options.mcp) {
+      return null;
+    }
     const url = await getActiveTabUrl(options.mcp, signal);
-    if (!url) return null;
+    if (!url) {
+      return null;
+    }
     try {
       const parsed = new URL(url);
       return parsed.protocol === "http:" || parsed.protocol === "https:"
@@ -197,7 +204,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
       undefined,
       { signal }
     );
-    if (result.isError) return { ok: false };
+    if (result.isError) {
+      return { ok: false };
+    }
     return {
       ok: true,
       value: evaluationResult(extractMcpText(result as { content?: unknown })),
@@ -215,12 +224,17 @@ export function createCredentialTools(options: CredentialToolOptions) {
   > {
     const nonce = crypto.randomBytes(8).toString("hex");
     const inspection = await evaluate(inspectionFunction(nonce), signal);
-    if (!inspection.ok) return { error: "Could not inspect the page inputs." };
+    if (!inspection.ok) {
+      return { error: "Could not inspect the page inputs." };
+    }
     const fills = pick(parsePageControls(inspection.value));
-    if (typeof fills === "string")
+    if (typeof fills === "string") {
       return { error: fills, errorType: "no_fields" };
+    }
     const written = await evaluate(fillFunction(fills, origin, nonce), signal);
-    if (!written.ok) return { error: "The page rejected the fill." };
+    if (!written.ok) {
+      return { error: "The page rejected the fill." };
+    }
     const outcome = written.value as {
       filled?: number;
       refused?: string;
@@ -233,8 +247,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
       };
     }
     const filled = Number(outcome?.filled ?? 0);
-    if (filled > 0)
+    if (filled > 0) {
       recentVaultFills.set(options.mcp!, { origin, at: Date.now() });
+    }
     return { filled, tokens: [...new Set(fills.map((fill) => fill.token))] };
   }
 
@@ -271,8 +286,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
     for (let n = 1; n < 50; n++) {
       const candidate = n === 1 ? base : `${base.slice(0, 36)}-${n}`;
       const resolved = await resolveProfile(candidate);
-      if (typeof resolved === "string" || resolved.allowed.has(origin))
+      if (typeof resolved === "string" || resolved.allowed.has(origin)) {
         return candidate;
+      }
     }
     return `${base.slice(0, 30)}-${crypto.randomBytes(3).toString("hex")}`;
   }
@@ -281,14 +297,16 @@ export function createCredentialTools(options: CredentialToolOptions) {
     handle: string,
     signal?: AbortSignal
   ): Promise<Record<string, unknown>> {
-    if (!options.mcp)
+    if (!options.mcp) {
       return {
         success: false,
         error: "The agent browser is not available this turn.",
       };
+    }
     const resolved = await resolveProfile(handle);
-    if (typeof resolved === "string")
+    if (typeof resolved === "string") {
       return { success: false, error: `${resolved} Use browser_vault_list.` };
+    }
     const { profile } = resolved;
     const keys = loginFieldKeys(profile.fields.map((field) => field.key));
     if (!keys.password && !keys.identifier) {
@@ -299,12 +317,13 @@ export function createCredentialTools(options: CredentialToolOptions) {
       };
     }
     const origin = await activeOrigin(signal);
-    if (!origin)
+    if (!origin) {
       return {
         success: false,
         error:
           "Could not determine the current page origin. Navigate to the login page first.",
       };
+    }
     if (!resolved.allowed.has(origin)) {
       return {
         success: false,
@@ -343,19 +362,22 @@ export function createCredentialTools(options: CredentialToolOptions) {
         origin,
         (controls) => {
           const fills = selectLoginFills(controls, values);
-          if (fills.length > 0) return fills;
+          if (fills.length > 0) {
+            return fills;
+          }
           return loginFields.length > 0
             ? "No sensitive login field on this page. Type the non-sensitive login fields, continue, then call browser_vault_fill again."
             : "No login form fields were found on the current page.";
         },
         signal
       );
-      if ("error" in outcome)
+      if ("error" in outcome) {
         return {
           success: false,
           error_type: outcome.errorType,
           error: mask(await options.scrub(outcome.error)),
         };
+      }
       const passwordFilled = outcome.tokens.includes("current-password");
       const twoFactor = keys.totp
         ? " (a code will be generated automatically)"
@@ -397,8 +419,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
         const items = await Promise.all(
           profiles.map(async (item) => {
             const resolved = await resolveProfile(item.name);
-            if (typeof resolved === "string")
+            if (typeof resolved === "string") {
               return { handle: item.name, available: false, error: resolved };
+            }
             const { profile, allowed } = resolved;
             const keys = loginFieldKeys(
               profile.fields.map((field) => field.key)
@@ -461,18 +484,20 @@ export function createCredentialTools(options: CredentialToolOptions) {
       async execute(_id, params, signal) {
         signal?.throwIfAborted();
         params = vaultSaveLoginSchema.parse(params ?? {});
-        if (!options.mcp)
+        if (!options.mcp) {
           return json({
             success: false,
             error: "The agent browser is not available this turn.",
           });
+        }
         const origin = await activeOrigin(signal);
-        if (!origin)
+        if (!origin) {
           return json({
             success: false,
             error:
               "Open the site's login page first; the login is saved for that page's origin.",
           });
+        }
         const handle = await freeHandle(
           handleFor(params.label ?? "", origin),
           origin
@@ -558,17 +583,19 @@ export function createCredentialTools(options: CredentialToolOptions) {
       async execute(_id, params, signal) {
         signal?.throwIfAborted();
         params = vaultOptionalHandleSchema.parse(params ?? {});
-        if (!options.mcp)
+        if (!options.mcp) {
           return json({
             success: false,
             error: "The agent browser is not available this turn.",
           });
+        }
         const origin = await activeOrigin(signal);
-        if (!origin)
+        if (!origin) {
           return json({
             success: false,
             error: "No page with a code field is open.",
           });
+        }
         const nonce = crypto.randomBytes(8).toString("hex");
         const inspection = await evaluate(inspectionFunction(nonce), signal);
         const otpControls = inspection.ok
@@ -636,12 +663,13 @@ export function createCredentialTools(options: CredentialToolOptions) {
           (controls) => selectOtpFills(classifyOtpControls(controls), value),
           signal
         );
-        if ("error" in outcome)
+        if ("error" in outcome) {
           return json({
             success: false,
             error_type: outcome.errorType,
             error: await options.scrub(outcome.error),
           });
+        }
         return json({
           success: outcome.filled > 0,
           filled_fields: outcome.filled,
@@ -668,8 +696,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
           );
         }
         const resolved = await resolveProfile(params.profile);
-        if (typeof resolved === "string")
+        if (typeof resolved === "string") {
           return text(`fill_secret failed: ${resolved}`);
+        }
         const field = resolved.profile.fields.find(
           (f) => f.key === params.field
         );
@@ -679,10 +708,11 @@ export function createCredentialTools(options: CredentialToolOptions) {
           );
         }
         const origin = await activeOrigin(signal);
-        if (!origin)
+        if (!origin) {
           return text(
             "fill_secret failed: could not determine the active page URL."
           );
+        }
         if (!resolved.allowed.has(origin)) {
           return text(
             `fill_secret refused: the active page origin ${origin} is not allowed for this credential (allowed: ${[...resolved.allowed].join(", ")}).`
@@ -733,8 +763,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
       async execute(_id, params, signal) {
         signal?.throwIfAborted();
         params = requestCredentialSchema.parse(params);
-        if (params.fields.length === 0)
+        if (params.fields.length === 0) {
           return text("request_credential failed: request at least one field.");
+        }
         const outcome = await waitForUser(
           "fields",
           params.profileName,
@@ -747,8 +778,9 @@ export function createCredentialTools(options: CredentialToolOptions) {
             `Credential profile "${params.profileName}" saved with fields: ${params.fields.map((f) => f.key).join(", ")}. Use browser_vault_list / fill_secret to use it.`
           );
         }
-        if (outcome === "dismissed")
+        if (outcome === "dismissed") {
           return text("The user dismissed the credential form without saving.");
+        }
         return text(
           "The user has not submitted the credential form yet. Ask them to fill it, or call request_credential again when they are ready."
         );

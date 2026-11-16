@@ -51,7 +51,9 @@ async function operationInProgress(projectId: string): Promise<boolean> {
           .stat(path.join(gitDir, state))
           .then(() => true)
           .catch((error: NodeJS.ErrnoException) => {
-            if (error.code === "ENOENT") return false;
+            if (error.code === "ENOENT") {
+              return false;
+            }
             throw error;
           })
       )
@@ -63,10 +65,11 @@ export async function prepareRunRepositoryUnlocked(
   projectId: string
 ): Promise<void> {
   try {
-    if (await operationInProgress(projectId))
+    if (await operationInProgress(projectId)) {
       throw new RepositoryRecoveryError(
         "Project files are being updated. Try again after the update finishes, or check Project settings → Git."
       );
+    }
     if (!(await repoGit.getProjectGit(projectId).status()).isClean()) {
       throw new RepositoryRecoveryError(
         "This project has pending file edits. Review and save them in Project settings → Git, then run the check again."
@@ -74,7 +77,9 @@ export async function prepareRunRepositoryUnlocked(
     }
     await reindexProjectUnlocked(projectId, { allowDirty: false });
   } catch (error) {
-    if (error instanceof RepositoryRecoveryError) throw error;
+    if (error instanceof RepositoryRecoveryError) {
+      throw error;
+    }
     console.error(
       `[specbook] preparing project files for ${projectId} failed:`,
       error
@@ -101,7 +106,7 @@ export async function repositoryRecoveryUnlocked(
         "A repository update needs attention. Finish that update before saving pending edits. Specbook keeps the files unchanged.",
     };
   }
-  if (status.isClean())
+  if (status.isClean()) {
     return {
       dirty: false,
       blocked: false,
@@ -110,6 +115,7 @@ export async function repositoryRecoveryUnlocked(
       canSave: false,
       message: "All project files are saved. Checks are ready to run.",
     };
+  }
   const [head, tracked, untracked, metadata] = await Promise.all([
     repoGit.getHeadSha(projectId),
     git.raw(["diff", "--name-only", "-z", "HEAD", "--"]),
@@ -129,10 +135,11 @@ export async function repositoryRecoveryUnlocked(
     canSave: false,
     message,
   });
-  if (names.length > 100)
+  if (names.length > 100) {
     return blocked(
       "There are more than 100 changed files. Review and save them from your Git client before running checks."
     );
+  }
   const root = repoGit.getRepoDir(projectId);
   const files: RecoveryFile[] = [];
   let bytes = 0;
@@ -146,7 +153,9 @@ export async function repositoryRecoveryUnlocked(
       );
     }
     const stat = await fs.stat(target).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return null;
+      if (error.code === "ENOENT") {
+        return null;
+      }
       throw error;
     });
     const beforeSize = await git
@@ -157,21 +166,24 @@ export async function repositoryRecoveryUnlocked(
       (stat && !stat.isFile()) ||
       (stat?.size ?? 0) > 256_000 ||
       beforeSize > 256_000
-    )
+    ) {
       return blocked(
         "A changed file is too large to review here. Review and save it from your Git client before running checks."
       );
+    }
     const before = await git.raw(["show", `HEAD:${name}`]).catch(() => null);
     const after = await readOptionalRepoFile(root, target);
     bytes += Buffer.byteLength(before ?? "") + Buffer.byteLength(after ?? "");
-    if (bytes > 1_000_000 || before?.includes("\0") || after?.includes("\0"))
+    if (bytes > 1_000_000 || before?.includes("\0") || after?.includes("\0")) {
       return blocked(
         "These edits include binary files or too much content to review here. Review and save them from your Git client before running checks."
       );
-    if (before === after)
+    }
+    if (before === after) {
       return blocked(
         "File permissions changed without a content change. Review and save those changes from your Git client."
       );
+    }
     files.push({
       path: name,
       before,
@@ -205,11 +217,14 @@ export async function saveRepositoryRecovery(
 ): Promise<{ commitSha: string; message: string }> {
   return repoGit.withRepoLock(projectId, async () => {
     const current = await repositoryRecoveryUnlocked(projectId);
-    if (!current.canSave) throw new RepositoryRecoveryError(current.message);
-    if (current.fingerprint !== fingerprint)
+    if (!current.canSave) {
+      throw new RepositoryRecoveryError(current.message);
+    }
+    if (current.fingerprint !== fingerprint) {
       throw new RepositoryRecoveryError(
         "The files changed after this review. Refresh the changes and review them again before saving."
       );
+    }
     const commitSha = await repoGit.commitAll(
       projectId,
       "specbook: save reviewed pending edits"

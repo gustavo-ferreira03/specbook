@@ -5,7 +5,9 @@ import { resolveRunEnvironment } from "../environments";
 
 export async function jobBaseUrl(job: Job): Promise<string | undefined> {
   const run = job.runId ? await runsRepository.getRun(job.runId) : null;
-  if (run?.baseUrl) return run.baseUrl;
+  if (run?.baseUrl) {
+    return run.baseUrl;
+  }
   const intent = (await stewardRepository.intents(job.projectId)).find(
     (row) => row.id === job.id || row.jobId === job.id
   );
@@ -14,7 +16,9 @@ export async function jobBaseUrl(job: Job): Promise<string | undefined> {
 
 export async function jobEnvironment(job: Job) {
   const run = job.runId ? await runsRepository.getRun(job.runId) : null;
-  if (run?.environment) return run.environment;
+  if (run?.environment) {
+    return run.environment;
+  }
   const intent = (await stewardRepository.intents(job.projectId)).find(
     (row) => row.id === job.id || row.jobId === job.id
   );

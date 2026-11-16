@@ -49,8 +49,9 @@ export function ProjectOverviewProvider({
         specSet.current &&
         specSet.current !== specs &&
         specSet.current.startsWith(`${projectId}:`)
-      )
+      ) {
         invalidate({ resource: "tree", projectId });
+      }
       specSet.current = specs;
     },
     [projectId]
@@ -60,14 +61,17 @@ export function ProjectOverviewProvider({
     const current = ++generation.current;
     try {
       const data = await getOverview(projectId);
-      if (current === generation.current) apply(data);
+      if (current === generation.current) {
+        apply(data);
+      }
     } catch {
-      if (current === generation.current)
+      if (current === generation.current) {
         setState((previous) => ({
           projectId,
           data: previous.projectId === projectId ? previous.data : null,
           failed: true,
         }));
+      }
     }
   }, [projectId, apply]);
 
@@ -82,7 +86,9 @@ export function ProjectOverviewProvider({
   useEffect(
     () =>
       onInvalidate((event) => {
-        if (!event.projectId || event.projectId === projectId) void reload();
+        if (!event.projectId || event.projectId === projectId) {
+          void reload();
+        }
       }),
     [projectId, reload]
   );
@@ -114,9 +120,10 @@ export function useDisplayStatus(spec: {
 
 export function useProjectOverview(): ProjectOverview {
   const overview = useContext(ProjectOverviewContext);
-  if (!overview)
+  if (!overview) {
     throw new Error(
       "useProjectOverview must be used inside ProjectOverviewProvider"
     );
+  }
   return overview;
 }

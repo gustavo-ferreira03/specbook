@@ -30,26 +30,30 @@ export function createEnvironmentsRouter(): Hono {
       await loadProject(projectId);
       const rows = await environmentsRepository.list(projectId);
       const previous = id ? rows.find((row) => row.id === id) : undefined;
-      if (id && !previous)
+      if (id && !previous) {
         throw new HTTPException(404, { message: "Environment not found" });
-      if (!adminSession && changesPrivateDestination(previous, input))
+      }
+      if (!adminSession && changesPrivateDestination(previous, input)) {
         throw new HTTPException(403, {
           message:
             "Only administrators signed in to the web app can change runner or tunnel destinations.",
         });
-      if (previous?.name === "Production" && input.name !== "Production")
+      }
+      if (previous?.name === "Production" && input.name !== "Production") {
         throw new HTTPException(400, {
           message: "Keep the default environment named Production",
         });
+      }
       if (
         rows.some(
           (row) =>
             row.id !== id && row.name.toLowerCase() === input.name.toLowerCase()
         )
-      )
+      ) {
         throw new HTTPException(409, {
           message: "An environment with this name already exists",
         });
+      }
       try {
         await validateEnvironmentCredentials(
           projectId,
@@ -103,13 +107,15 @@ export function createEnvironmentsRouter(): Hono {
       const row = (await environmentsRepository.list(c.req.param("id"))).find(
         (environment) => environment.id === c.req.param("environmentId")
       );
-      if (!row)
+      if (!row) {
         throw new HTTPException(404, { message: "Environment not found" });
-      if (row.name === "Production")
+      }
+      if (row.name === "Production") {
         throw new HTTPException(400, {
           message:
             "Production is the default environment and cannot be removed",
         });
+      }
       await environmentsRepository.delete(row.id);
       return c.body(null, 204);
     }

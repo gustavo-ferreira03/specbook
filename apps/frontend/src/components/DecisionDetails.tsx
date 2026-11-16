@@ -48,9 +48,12 @@ function Screenshots({ item }: { item: PresentedInboxItem }) {
     item.presentation.type === "update" &&
     item.presentation.screenshots.after &&
     !item.presentation.screenshots.before
-  )
+  ) {
     shots.unshift(["before", null]);
-  if (!shots.length) return null;
+  }
+  if (!shots.length) {
+    return null;
+  }
   const url = (value: string) =>
     value.startsWith("/") ? `${API_URL}${value}` : value;
   return (
@@ -102,7 +105,9 @@ function Screenshots({ item }: { item: PresentedInboxItem }) {
       <Dialog
         open={Boolean(selected)}
         onOpenChange={(open) => {
-          if (!open) setSelected(null);
+          if (!open) {
+            setSelected(null);
+          }
         }}
       >
         <DialogContent className="max-w-data sm:max-w-data">
@@ -124,10 +129,13 @@ function Screenshots({ item }: { item: PresentedInboxItem }) {
 }
 
 function SuggestedBehavior({ item }: { item: PresentedInboxItem }) {
-  if (!["update", "new_check", "feature"].includes(item.presentation.type))
+  if (!["update", "new_check", "feature"].includes(item.presentation.type)) {
     return null;
+  }
   const { humanSpec, description } = item.payload.params ?? {};
-  if (!humanSpec && !description) return null;
+  if (!humanSpec && !description) {
+    return null;
+  }
   return (
     <div className="max-w-reading border-line space-y-4 border-t pt-4">
       {description && (
@@ -191,7 +199,9 @@ function SuggestedBehavior({ item }: { item: PresentedInboxItem }) {
 }
 
 function ProposedChanges({ item }: { item: PresentedInboxItem }) {
-  if (!item.payload.files?.length) return null;
+  if (!item.payload.files?.length) {
+    return null;
+  }
   return (
     <section className="space-y-3">
       <h3 className="text-body text-ink font-medium">Proposed changes</h3>
@@ -275,12 +285,13 @@ export function DecisionDetails({
   }
 
   function actions(item: PresentedInboxItem) {
-    if (!canEdit)
+    if (!canEdit) {
       return (
         <p className="text-body text-ink-muted">
           An editor can answer or review this decision.
         </p>
       );
+    }
     const { type, credentialRequest } = item.presentation;
     const active = busy?.id === item.id;
     const label = (action: InboxAction, ready: string, working: string) =>

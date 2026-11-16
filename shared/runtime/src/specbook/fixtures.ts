@@ -139,7 +139,9 @@ class ReplayCapture {
         INPUT_TAGS.has(String(node.tagName))
       ) {
         this.inputs.add(node.id);
-        if (marks(attributes)) this.sensitive.add(node.id);
+        if (marks(attributes)) {
+          this.sensitive.add(node.id);
+        }
         if (this.sensitive.has(node.id) || hasSecret(attributes.value)) {
           attributes.value = hidden(attributes.value);
           attributes[MASK_ATTRIBUTE] = "";
@@ -147,25 +149,37 @@ class ReplayCapture {
       }
       node.childNodes?.forEach(visit);
     };
-    if (!data) return marked;
+    if (!data) {
+      return marked;
+    }
     if (event.type === 2 && data.node) {
       this.inputs.clear();
       this.sensitive.clear();
       visit(data.node);
     }
-    if (event.type !== 3) return marked;
+    if (event.type !== 3) {
+      return marked;
+    }
     if (data.source === 0) {
-      for (const add of data.adds ?? []) visit(add.node);
+      for (const add of data.adds ?? []) {
+        visit(add.node);
+      }
       for (const change of data.attributes ?? []) {
-        if (!this.inputs.has(change.id)) continue;
-        if (marks(change.attributes)) this.sensitive.add(change.id);
+        if (!this.inputs.has(change.id)) {
+          continue;
+        }
+        if (marks(change.attributes)) {
+          this.sensitive.add(change.id);
+        }
         if (
           !this.sensitive.has(change.id) &&
           !hasSecret(change.attributes.value)
-        )
+        ) {
           continue;
-        if ("value" in change.attributes)
+        }
+        if ("value" in change.attributes) {
           change.attributes.value = hidden(change.attributes.value);
+        }
         change.attributes[MASK_ATTRIBUTE] = "";
       }
       return [];
@@ -182,9 +196,11 @@ class ReplayCapture {
   }
 
   receive(event: ReplayEvent): void {
-    if (this.stopped || this.unavailable) return;
+    if (this.stopped || this.unavailable) {
+      return;
+    }
     const marked = this.masks(event);
-    if (marked.length)
+    if (marked.length) {
       this.receive({
         type: 3,
         timestamp: event.timestamp,
@@ -199,6 +215,7 @@ class ReplayCapture {
           })),
         },
       });
+    }
     try {
       const value = JSON.stringify(
         scrubJson(event, (text) =>
@@ -254,12 +271,16 @@ class ReplayCapture {
 async function startReplay(page: Page, replay: ReplayCapture): Promise<void> {
   const binding = "__specbookReplayEvent";
   await page.exposeBinding(binding, ({ frame }, event: ReplayEvent) => {
-    if (frame === page.mainFrame()) replay.receive(event);
+    if (frame === page.mainFrame()) {
+      replay.receive(event);
+    }
   });
   const content = `${await readRecorderSource()}\n;(${function (
     createImages: typeof createReplayImageRecorder
   ) {
-    if (window !== window.top) return;
+    if (window !== window.top) {
+      return;
+    }
     const target = globalThis as unknown as {
       rrweb: {
         record: ((
@@ -321,7 +342,9 @@ async function stopReplay(page: Page, replay: ReplayCapture): Promise<void> {
 function diagnosticUrl(value: string): string | undefined {
   try {
     const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return undefined;
+    }
     return `${url.origin}${url.pathname}`.slice(0, 2000);
   } catch {
     return undefined;
@@ -340,8 +363,9 @@ export const test = base.extend<{
   request: async ({ request, _specbookEvidence }, use) => {
     await use(
       guard.wrapRequest(request, (evidence) => {
-        if (_specbookEvidence.apiRequests.length < 30)
+        if (_specbookEvidence.apiRequests.length < 30) {
           _specbookEvidence.apiRequests.push(evidence);
+        }
       }) as never
     );
   },
@@ -374,16 +398,18 @@ export const test = base.extend<{
     }
     const diagnostics: RunDiagnostic[] = [];
     const capture = (item: RunDiagnostic) => {
-      if (diagnostics.length < 100)
+      if (diagnostics.length < 100) {
         diagnostics.push({ ...item, message: item.message.slice(0, 2000) });
+      }
     };
     const onConsole = (message: ConsoleMessage) => {
-      if (message.type() === "error")
+      if (message.type() === "error") {
         capture({
           kind: "console",
           message: message.text(),
           url: diagnosticUrl(message.location().url),
         });
+      }
     };
     const onPageError = (error: Error) =>
       capture({ kind: "pageerror", message: error.message });
@@ -395,7 +421,7 @@ export const test = base.extend<{
         method: request.method(),
       });
     const onResponse = (response: Response) => {
-      if (response.status() >= 400)
+      if (response.status() >= 400) {
         capture({
           kind: "response",
           message: response.statusText(),
@@ -403,6 +429,7 @@ export const test = base.extend<{
           url: diagnosticUrl(response.url()),
           method: response.request().method(),
         });
+      }
     };
     page.on("console", onConsole);
     page.on("pageerror", onPageError);
@@ -427,10 +454,11 @@ export const test = base.extend<{
           contentType: "application/json",
         });
       }
-      if (navigation)
+      if (navigation) {
         await withEvidenceTimeout(() => navigation.detach(), 1000).catch(
           () => undefined
         );
+      }
       page.off("console", onConsole);
       page.off("pageerror", onPageError);
       page.off("requestfailed", onRequestFailed);
@@ -449,11 +477,15 @@ export const test = base.extend<{
     let count = 0;
     let active = false;
     await use(async (title, body) => {
-      if (typeof title !== "string" || !title.trim())
+      if (typeof title !== "string" || !title.trim()) {
         throw new Error("step() needs a title");
-      if (typeof body !== "function")
+      }
+      if (typeof body !== "function") {
         throw new Error("step() needs an async function");
-      if (active) throw new Error("Steps cannot be nested");
+      }
+      if (active) {
+        throw new Error("Steps cannot be nested");
+      }
       active = true;
       count += 1;
       const number = String(count).padStart(2, "0");
@@ -480,7 +512,9 @@ export const test = base.extend<{
           description: specErrorCode(error),
         });
         try {
-          if (!real) throw new Error("This step has no browser page");
+          if (!real) {
+            throw new Error("This step has no browser page");
+          }
           const snapshot = await real
             .locator("body")
             .ariaSnapshot({ timeout: 2000 });
@@ -507,7 +541,9 @@ export const test = base.extend<{
         }
         const file = testInfo.outputPath(`${STEP_ATTACHMENT_PREFIX}${number}`);
         try {
-          if (!real) throw new Error("This step has no browser page");
+          if (!real) {
+            throw new Error("This step has no browser page");
+          }
           const image = await captureStepScreenshot(real, file, secretValues);
           await testInfo.attach(`${STEP_ATTACHMENT_PREFIX}${number}`, {
             path: image.file,
@@ -544,13 +580,17 @@ export const test = base.extend<{
   ) => {
     let registered: (() => Promise<void>) | undefined;
     await use(async (body) => {
-      if (typeof body !== "function")
+      if (typeof body !== "function") {
         throw new Error("cleanup() needs an async function");
+      }
       registered = body;
     });
-    if (!registered) return;
-    if (_specbookEvidence.page && _specbookEvidence.replay)
+    if (!registered) {
+      return;
+    }
+    if (_specbookEvidence.page && _specbookEvidence.replay) {
       await stopReplay(_specbookEvidence.page, _specbookEvidence.replay);
+    }
     testInfo.setTimeout(testInfo.timeout + CLEANUP_BUDGET_MS + 1000);
     let timer: NodeJS.Timeout | undefined;
     try {
@@ -572,9 +612,12 @@ function settlingMatchers<T extends object>(matchers: T): T {
   return new Proxy(matchers, {
     get(target, key, receiver) {
       const value = Reflect.get(target, key, receiver);
-      if (key === "not" && value && typeof value === "object")
+      if (key === "not" && value && typeof value === "object") {
         return settlingMatchers(value as object);
-      if (typeof value !== "function") return value;
+      }
+      if (typeof value !== "function") {
+        return value;
+      }
       return (...args: unknown[]) =>
         settleStrict(() =>
           Promise.resolve(
@@ -586,12 +629,17 @@ function settlingMatchers<T extends object>(matchers: T): T {
 }
 
 export function expect(target: unknown, ...rest: unknown[]) {
-  if (rest.length > 0)
+  if (rest.length > 0) {
     throw new Error("expect() takes one page, locator or API response value");
+  }
   const locator = unwrap(target, ["locator"]);
-  if (locator) return settlingMatchers(baseExpect(locator as never));
+  if (locator) {
+    return settlingMatchers(baseExpect(locator as never));
+  }
   const real = unwrap(target, ["page", "apiResponse"]);
-  if (real) return baseExpect(real as never);
+  if (real) {
+    return baseExpect(real as never);
+  }
   if (
     target === null ||
     ["string", "number", "boolean"].includes(typeof target) ||

@@ -42,7 +42,9 @@ export async function runnerQueueSnapshot() {
     group: string | null
   ) => JSON.stringify([projectId, environmentId, group]);
   for (const { environment, projectName } of configured) {
-    if (environment.executor === "server") continue;
+    if (environment.executor === "server") {
+      continue;
+    }
     entries.set(
       keyOf(environment.projectId, environment.id, environment.runnerGroup),
       {
@@ -67,9 +69,13 @@ export async function runnerQueueSnapshot() {
   const batchQueues = new Map<string, RunnerQueueEntry>();
   const runQueues = new Map<string, RunnerQueueEntry>();
   for (const job of jobs) {
-    if (job.status !== "queued") continue;
+    if (job.status !== "queued") {
+      continue;
+    }
     const environment = byRun.get(job.payload.specs[0].runId);
-    if (!environment) continue;
+    if (!environment) {
+      continue;
+    }
     const key = keyOf(job.projectId, environment.id, job.group);
     let entry = entries.get(key);
     if (!entry) {
@@ -92,13 +98,18 @@ export async function runnerQueueSnapshot() {
       entries.set(key, entry);
     }
     entry.queued += job.payload.specs.length;
-    if (!entry.oldestQueuedAt || job.createdAt < entry.oldestQueuedAt)
+    if (!entry.oldestQueuedAt || job.createdAt < entry.oldestQueuedAt) {
       entry.oldestQueuedAt = job.createdAt;
+    }
     batchQueues.set(job.batchId, entry);
-    for (const spec of job.payload.specs) runQueues.set(spec.runId, entry);
+    for (const spec of job.payload.specs) {
+      runQueues.set(spec.runId, entry);
+    }
   }
   for (const entry of entries.values()) {
-    if (entry.executor === "tunnel") continue;
+    if (entry.executor === "tunnel") {
+      continue;
+    }
     const online = instances.filter(
       (instance) =>
         instance.mode === "runner" &&
@@ -137,7 +148,9 @@ export async function runnerQueueSnapshot() {
           byRun.get(job.payload.specs[0].runId)?.id === entry.environmentId &&
           job.lastFailure
       );
-      if (retry) entry.reason = `${retry.lastFailure} ${entry.reason}`;
+      if (retry) {
+        entry.reason = `${retry.lastFailure} ${entry.reason}`;
+      }
     }
   }
   for (const queue of await tunnelQueueEntries()) {
@@ -145,8 +158,9 @@ export async function runnerQueueSnapshot() {
       keyOf(queue.projectId, queue.environmentId, queue.group),
       queue
     );
-    for (const id of tunnelRunIds)
+    for (const id of tunnelRunIds) {
       if (byRun.get(id)?.id === queue.environmentId) runQueues.set(id, queue);
+    }
   }
   return { queues: [...entries.values()], batchQueues, runQueues };
 }
@@ -159,8 +173,9 @@ export async function visibleRuns<T extends Run>(
       (run) =>
         run.status === "running" && run.environment?.executor !== "server"
     )
-  )
+  ) {
     return runs.map((run) => ({ ...run, queue: null }));
+  }
   const { runQueues } = await runnerQueueSnapshot();
   return runs.map((run) => ({
     ...run,

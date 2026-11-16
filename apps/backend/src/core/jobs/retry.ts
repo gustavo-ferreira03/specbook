@@ -17,7 +17,9 @@ async function askAboutStalledWork(job: Job): Promise<void> {
         statuses: ["pending", "applying"],
       })
     ).length > 0;
-  if (existing) return;
+  if (existing) {
+    return;
+  }
   let spec = job.specId ? await specsRepository.getSpec(job.specId) : null;
   const source =
     job.kind === "generate_spec"
@@ -26,8 +28,9 @@ async function askAboutStalledWork(job: Job): Promise<void> {
   const candidate = (
     source ? specBatchOf(source) : undefined
   )?.candidates?.find((candidate) => candidate.jobId === job.id);
-  if (!spec && candidate?.specId)
+  if (!spec && candidate?.specId) {
     spec = await specsRepository.getSpec(candidate.specId);
+  }
   const name = spec?.title ?? candidate?.title;
   const scrub = createProjectScrubber(job.projectId);
   await jobsRepository.addItem({
@@ -59,7 +62,9 @@ export async function stallJob(
   code?: ErrorCode
 ): Promise<void> {
   const current = await jobsRepository.get(job.id);
-  if (current?.status !== "running") return;
+  if (current?.status !== "running") {
+    return;
+  }
   const candidates = await jobsRepository.itemsForJob(job.id);
   const failure = candidates
     .map((item) => verificationOf(item)?.failReason)
@@ -91,13 +96,16 @@ export async function stallJob(
         "failed",
     }
   );
-  if (changed) await jobsRepository.log(job.id, "stalled", stopReason);
+  if (changed) {
+    await jobsRepository.log(job.id, "stalled", stopReason);
+  }
 }
 
 export async function retryStalledJob(job: Job): Promise<void> {
   const current = await jobsRepository.get(job.id);
-  if (!current || current.startedAt || (await isAgentPaused(job.projectId)))
+  if (!current || current.startedAt || (await isAgentPaused(job.projectId))) {
     return;
+  }
   if (
     current.status === "blocked" &&
     current.safetyRetries >= MAX_SAFETY_RETRIES &&
@@ -107,7 +115,9 @@ export async function retryStalledJob(job: Job): Promise<void> {
     await askAboutStalledWork(current);
     return;
   }
-  if (current.status !== "stalled") return;
+  if (current.status !== "stalled") {
+    return;
+  }
   if (current.systemError) {
     await retryInfrastructure(
       current,
@@ -123,21 +133,26 @@ export async function retryStalledJob(job: Job): Promise<void> {
       "blocked",
       { retryAt: null }
     );
-    if (blocked) await askAboutStalledWork(blocked);
+    if (blocked) {
+      await askAboutStalledWork(blocked);
+    }
     return;
   }
-  if (current.retryAt && Date.parse(current.retryAt) > Date.now()) return;
+  if (current.retryAt && Date.parse(current.retryAt) > Date.now()) {
+    return;
+  }
   const changed = await jobsRepository.requeue(current, "stalled", {
     safetyRetries: current.safetyRetries + 1,
     stopReason: current.stopReason,
     pendingMessage: `Continue the unfinished investigation with a different approach; the last attempt stopped because: ${current.stopReason ?? "it did not reach a confirmed result"}. First read the existing suggestions, the failed verification and the browser state, then say what you will change. Never repeat a locator, timing change or browser action without new evidence. Keep spec.yml unchanged. Ask a specific question only when access, missing information or a human decision blocks you.`,
   });
-  if (changed)
+  if (changed) {
     await jobsRepository.log(
       job.id,
       "different_approach",
       `Attempt ${current.safetyRetries + 1}: ${current.stopReason ?? "No confirmed result"}`
     );
+  }
 }
 
 export async function retryInfrastructure(
@@ -146,8 +161,9 @@ export async function retryInfrastructure(
   code: ErrorCode = "infrastructure"
 ): Promise<void> {
   const current = await jobsRepository.get(job.id);
-  if (!current || !["running", "blocked", "stalled"].includes(current.status))
+  if (!current || !["running", "blocked", "stalled"].includes(current.status)) {
     return;
+  }
   const message = await createProjectScrubber(job.projectId)(error);
   const attempts = current.infrastructureRetries + 1;
   const activeMs = current.startedAt
@@ -170,5 +186,7 @@ export async function retryInfrastructure(
     },
     { to: (await isAgentPaused(job.projectId)) ? "paused" : "queued", activeMs }
   );
-  if (changed) await jobsRepository.log(job.id, "service_retry", message);
+  if (changed) {
+    await jobsRepository.log(job.id, "service_retry", message);
+  }
 }

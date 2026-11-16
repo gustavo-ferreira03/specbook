@@ -14,8 +14,9 @@ export async function specDetail(spec: Spec, runLimit?: number) {
   const feature = await featuresRepository.getFeature(spec.featureId);
   const runs = await runsRepository.listRuns(spec.id, { limit: runLimit });
   const raw = await readSpecRawFiles(spec).catch((error) => {
-    if (error instanceof UnsafeRepoPathError)
+    if (error instanceof UnsafeRepoPathError) {
       return { yaml: null, testSource: null };
+    }
     throw error;
   });
   let humanSpec: HumanSpec | null = null;

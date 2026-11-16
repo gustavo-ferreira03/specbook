@@ -64,23 +64,27 @@ export function SessionReplay({
       import("rrweb-player"),
     ])
       .then(([recording, shared, sharedStyles, player]) => {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
           setLoaded({
             recording,
             shared,
             Player: player.default,
             styles: sharedStyles.REPLAY_PLAYER_STYLES,
           });
+        }
       })
       .catch((cause: unknown) => {
-        if (!controller.signal.aborted && !isAbortError(cause))
+        if (!controller.signal.aborted && !isAbortError(cause)) {
           setError(errorMessage(cause));
+        }
       });
     return () => controller.abort();
   }, [runId]);
 
   useEffect(() => {
-    if (!loaded || !container.current) return;
+    if (!loaded || !container.current) {
+      return;
+    }
     let mounted: ReplayController;
     try {
       mounted = loaded.shared.mountReplay(container.current, {
@@ -95,7 +99,9 @@ export function SessionReplay({
       return;
     }
     return () => {
-      if (controls.current === mounted) controls.current = null;
+      if (controls.current === mounted) {
+        controls.current = null;
+      }
       mounted.destroy();
     };
   }, [controls, failReason, loaded, onReady]);

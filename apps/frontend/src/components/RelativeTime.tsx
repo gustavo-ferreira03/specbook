@@ -42,7 +42,9 @@ export function RelativeTime({
     () => now
   );
   const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
   return (
     <time
       dateTime={date.toISOString()}

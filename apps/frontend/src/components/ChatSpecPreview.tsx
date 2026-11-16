@@ -55,13 +55,17 @@ export function ChatSpecPreview({
         setSelectedRunId((current) => current ?? data.runs[0]?.id);
       })
       .catch((error) => {
-        if (!isAbortError(error)) setError(errorMessage(error));
+        if (!isAbortError(error)) {
+          setError(errorMessage(error));
+        }
       });
     return () => controller.abort();
   }, [specId, retryKey]);
 
   useEffect(() => {
-    if (!selectedRunId) return;
+    if (!selectedRunId) {
+      return;
+    }
     const controller = new AbortController();
     setRun(null);
     setRunError("");
@@ -73,21 +77,28 @@ export function ChatSpecPreview({
           apiPath`/runs/${selectedRunId}`,
           { signal: controller.signal }
         );
-        if (controller.signal.aborted) return;
-        if (selected.specId !== specId)
+        if (controller.signal.aborted) {
+          return;
+        }
+        if (selected.specId !== specId) {
           throw new Error("This run does not belong to the selected Spec.");
+        }
         setRun(selected);
       } catch (error) {
-        if (!controller.signal.aborted && !isAbortError(error))
+        if (!controller.signal.aborted && !isAbortError(error)) {
           setRunError(errorMessage(error));
+        }
         return;
       }
       try {
         const evidence = await getRunEvidence(selectedRunId, controller.signal);
-        if (!controller.signal.aborted) setEvidence(evidence);
+        if (!controller.signal.aborted) {
+          setEvidence(evidence);
+        }
       } catch (error) {
-        if (!controller.signal.aborted && !isAbortError(error))
+        if (!controller.signal.aborted && !isAbortError(error)) {
           setEvidenceError(errorMessage(error));
+        }
       }
     })();
     return () => controller.abort();
@@ -101,7 +112,9 @@ export function ChatSpecPreview({
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) {
+          onClose();
+        }
       }}
     >
       <DialogContent className="sm:max-w-reading max-h-[90dvh] overflow-y-auto">

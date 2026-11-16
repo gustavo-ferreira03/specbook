@@ -66,11 +66,11 @@ export function ChatContextReview({
     setError("");
     setFeedback("");
     try {
-      if (action === "discuss")
+      if (action === "discuss") {
         await onDiscuss(
           "I'd like to review these discovery findings before confirming the project context."
         );
-      else {
+      } else {
         const { revision: updated } = await (action === "confirm"
           ? confirmProjectContext(current.id)
           : discardProjectContext(current.id));

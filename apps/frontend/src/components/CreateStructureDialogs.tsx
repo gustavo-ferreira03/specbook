@@ -53,9 +53,13 @@ export function NewFeatureDialog({
   const [error, setError] = useState("");
 
   function changeOpen(nextOpen: boolean) {
-    if (busy) return;
+    if (busy) {
+      return;
+    }
     setOpen(nextOpen);
-    if (!nextOpen) setError("");
+    if (!nextOpen) {
+      setError("");
+    }
   }
 
   async function create() {
@@ -77,7 +81,9 @@ export function NewFeatureDialog({
     }
   }
 
-  if (!canEdit) return null;
+  if (!canEdit) {
+    return null;
+  }
   return (
     <>
       <Button
@@ -180,9 +186,13 @@ export function NewSpecDialog({
   const [error, setError] = useState("");
 
   function changeOpen(nextOpen: boolean) {
-    if (busy) return;
+    if (busy) {
+      return;
+    }
     setOpen(nextOpen);
-    if (!nextOpen) setError("");
+    if (!nextOpen) {
+      setError("");
+    }
   }
 
   async function create() {
@@ -203,7 +213,9 @@ export function NewSpecDialog({
     }
   }
 
-  if (!canEdit) return null;
+  if (!canEdit) {
+    return null;
+  }
   return (
     <>
       <Button

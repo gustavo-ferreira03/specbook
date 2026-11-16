@@ -56,8 +56,9 @@ export async function enqueueRunnerBatch(
   payload: RunnerPayload
 ): Promise<void> {
   const work = runnerPayloadSchema.parse(payload);
-  if (work.batchId !== batchId || work.projectId !== projectId)
+  if (work.batchId !== batchId || work.projectId !== projectId) {
     throw new Error("Runner work does not match its batch");
+  }
   await runnersRepository.enqueue(batchId, projectId, group || null, work);
   events.emit("work");
 }
@@ -83,7 +84,9 @@ function waitForWork(signal: AbortSignal, milliseconds: number): Promise<void> {
     const timer = setTimeout(finish, milliseconds);
     events.once("work", finish);
     signal.addEventListener("abort", finish, { once: true });
-    if (signal.aborted) finish();
+    if (signal.aborted) {
+      finish();
+    }
   });
 }
 
@@ -97,29 +100,36 @@ export async function claimRunnerWork(
     await maintainRunnerQueue();
     const job = await withQueueLock("queue", async () => {
       const current = await runnersRepository.get(runner.id);
-      if (!current)
+      if (!current) {
         throw new HTTPException(401, { message: "Runner token was revoked" });
-      if (current.tokenHash !== runner.tokenHash)
+      }
+      if (current.tokenHash !== runner.tokenHash) {
         throw new HTTPException(401, {
           message: "Runner token was rotated. Configure the replacement token.",
         });
+      }
       const instance = await runnersRepository.instance(instanceId);
       if (
         !instance ||
         instance.disconnectedAt ||
         instance.runnerId !== runner.id ||
         instance.mode !== "runner"
-      )
+      ) {
         throw new HTTPException(409, {
           message: "Runner instance disconnected. Restart the CLI process.",
         });
+      }
       return runnersRepository.claim(current, runnerLeaseMs(), instanceId, [
         ...activeCompletions,
       ]);
     });
-    if (job) return job;
+    if (job) {
+      return job;
+    }
     const remaining = deadline - Date.now();
-    if (remaining <= 0) break;
+    if (remaining <= 0) {
+      break;
+    }
     await waitForWork(signal, Math.min(1000, remaining));
   }
   await runnersRepository.touch(runner.id);
@@ -137,11 +147,12 @@ export async function reportRunnerInstance(
 ): Promise<void> {
   await withQueueLock("queue", async () => {
     const current = await runnersRepository.get(runner.id);
-    if (!current || current.tokenHash !== runner.tokenHash)
+    if (!current || current.tokenHash !== runner.tokenHash) {
       throw new HTTPException(401, {
         message:
           "Runner token changed. Configure the replacement token and restart the runner.",
       });
+    }
     await runnersRepository.touch(runner.id, input);
     await runnersRepository.reportInstance(runner.id, input.instanceId, input);
   });
@@ -153,8 +164,9 @@ export async function disconnectRunnerInstance(
 ): Promise<void> {
   await withQueueLock("queue", async () => {
     const current = await runnersRepository.get(runner.id);
-    if (!current || current.tokenHash !== runner.tokenHash)
+    if (!current || current.tokenHash !== runner.tokenHash) {
       throw new HTTPException(401, { message: "Runner token changed" });
+    }
     await runnersRepository.disconnect(runner.id, instanceId);
   });
   events.emit("work");
@@ -193,18 +205,20 @@ export async function heartbeatRunnerWork(
   leaseId: string
 ): Promise<string> {
   return withQueueLock("queue", async () => {
-    if (!(await runnersRepository.get(runnerId)))
+    if (!(await runnersRepository.get(runnerId))) {
       throw new HTTPException(401, { message: "Runner token was revoked" });
+    }
     const expiresAt = await runnersRepository.heartbeat(
       jobId,
       leaseId,
       runnerId,
       runnerLeaseMs()
     );
-    if (!expiresAt)
+    if (!expiresAt) {
       throw new HTTPException(409, {
         message: "Runner lease expired or this work was reassigned",
       });
+    }
     return expiresAt;
   });
 }
@@ -217,8 +231,9 @@ export async function releaseRunnerWork(
 ): Promise<void> {
   await jobLocks.run(jobId, async () => {
     const job = await withQueueLock("queue", async () => {
-      if (!(await runnersRepository.get(runnerId)))
+      if (!(await runnersRepository.get(runnerId))) {
         throw new HTTPException(401, { message: "Runner token was revoked" });
+      }
       const job = requireLease(
         await runnersRepository.job(jobId),
         runnerId,
@@ -227,7 +242,9 @@ export async function releaseRunnerWork(
       if (reason) {
         await runnersRepository.reserveCompletion(jobId);
         activeCompletions.add(jobId);
-      } else await runnersRepository.release(jobId, leaseId, runnerId);
+      } else {
+        await runnersRepository.release(jobId, leaseId, runnerId);
+      }
       return job;
     });
     if (reason) {
@@ -248,14 +265,16 @@ export async function completeRunnerWork(
 ): Promise<void> {
   await jobLocks.run(jobId, async () => {
     const job = await withQueueLock("queue", async () => {
-      if (!(await runnersRepository.get(runnerId)))
+      if (!(await runnersRepository.get(runnerId))) {
         throw new HTTPException(401, { message: "Runner token was revoked" });
+      }
       const row = await runnersRepository.job(jobId);
       if (
         leaseMatches(row, runnerId, completion.leaseId) &&
         row.status === "completed"
-      )
+      ) {
         return null;
+      }
       const job = requireLease(row, runnerId, completion.leaseId);
       const expected = new Set(job.payload.specs.map((spec) => spec.runId));
       const reported = new Set(
@@ -275,7 +294,9 @@ export async function completeRunnerWork(
       activeCompletions.add(jobId);
       return job;
     });
-    if (!job) return;
+    if (!job) {
+      return;
+    }
     const staging = path.join(
       runsDir,
       `.runner-upload-${job.id}-${completion.leaseId}`
@@ -303,46 +324,53 @@ export async function completeRunnerWork(
       const root = await fs.realpath(runsDir);
       if (
         (await fs.realpath(staging)) !== path.join(root, path.basename(staging))
-      )
+      ) {
         throw new HTTPException(400, {
           message: "Invalid runner artifact directory",
         });
+      }
       for (const result of completion.results) {
         const paths = new Set<string>();
         let replayBytes: number | null = null;
         let replayUnavailable: string | undefined;
         for (const artifact of result.artifacts) {
-          if (!runnerArtifactPathSchema.safeParse(artifact.path).success)
+          if (!runnerArtifactPathSchema.safeParse(artifact.path).success) {
             throw new HTTPException(400, {
               message: "Invalid runner artifact path",
             });
-          if (paths.has(artifact.path))
+          }
+          if (paths.has(artifact.path)) {
             throw new HTTPException(400, {
               message: "Artifact paths must be unique for each run",
             });
+          }
           paths.add(artifact.path);
           // The server keeps the immutable Spec snapshot prepared before dispatch.
-          if (artifact.path === "spec.ts" || artifact.path === "spec.yml")
+          if (artifact.path === "spec.ts" || artifact.path === "spec.yml") {
             continue;
+          }
           let content: Buffer = Buffer.from(artifact.content, "base64");
           bytes += content.length;
           if (
             bytes > RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES ||
             content.length > 32 * 1024 * 1024
-          )
+          ) {
             throw new HTTPException(413, {
               message: "Runner artifacts exceed the upload limit",
             });
+          }
           if (artifact.path === REPLAY_FILE) {
-            if (content.length > MAX_REPLAY_BYTES)
+            if (content.length > MAX_REPLAY_BYTES) {
               throw new HTTPException(413, {
                 message: "Runner replay exceeds the compressed limit",
               });
+            }
             const events = await decodeReplay(content);
-            if (!events)
+            if (!events) {
               throw new HTTPException(400, {
                 message: "Invalid runner replay recording",
               });
+            }
             const safe = await encodeReplay(scrubJson(events, scrub));
             if (!safe) {
               replayUnavailable =
@@ -368,10 +396,11 @@ export async function completeRunnerWork(
           if (
             storedBytes > RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES ||
             content.length > 32 * 1024 * 1024
-          )
+          ) {
             throw new HTTPException(413, {
               message: "Runner artifacts exceed the upload limit",
             });
+          }
           const file = path.join(staging, result.runId, artifact.path);
           await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
           await fs.writeFile(file, content, { mode: 0o600, flag: "wx" });
@@ -397,25 +426,30 @@ export async function completeRunnerWork(
             !manifest ||
             Array.isArray(manifest) ||
             typeof manifest !== "object"
-          )
+          ) {
             throw new HTTPException(400, {
               message: "Invalid runner replay evidence manifest",
             });
+          }
           manifest.replay =
             replayBytes === null
               ? null
               : { file: REPLAY_FILE, bytes: replayBytes };
-          if (replayUnavailable) manifest.replayUnavailable = replayUnavailable;
-          else delete manifest.replayUnavailable;
+          if (replayUnavailable) {
+            manifest.replayUnavailable = replayUnavailable;
+          } else {
+            delete manifest.replayUnavailable;
+          }
           const updated = JSON.stringify(manifest);
           storedBytes += Buffer.byteLength(updated) - Buffer.byteLength(text!);
           if (
             storedBytes > RUNNER_ARTIFACT_UPLOAD_LIMIT_BYTES ||
             Buffer.byteLength(updated) > 32 * 1024 * 1024
-          )
+          ) {
             throw new HTTPException(413, {
               message: "Runner artifacts exceed the upload limit",
             });
+          }
           await fs.writeFile(manifestFile, updated, { mode: 0o600 });
         }
       }
@@ -426,24 +460,27 @@ export async function completeRunnerWork(
           fs.realpath(runsDir),
           fs.realpath(target),
         ]);
-        if (actual !== path.join(root, result.runId))
+        if (actual !== path.join(root, result.runId)) {
           throw new HTTPException(400, {
             message: "Invalid runner artifact directory",
           });
+        }
         await fs.rm(path.join(target, "evidence"), {
           recursive: true,
           force: true,
         });
         await fs.rm(path.join(target, "evidence.json"), { force: true });
         for (const artifact of result.artifacts) {
-          if (artifact.path === "spec.ts" || artifact.path === "spec.yml")
+          if (artifact.path === "spec.ts" || artifact.path === "spec.yml") {
             continue;
+          }
           const source = path.join(staging, result.runId, artifact.path);
           if (
             artifact.path === REPLAY_FILE &&
             !(await fs.lstat(source).catch(() => null))
-          )
+          ) {
             continue;
+          }
           const destination = path.join(target, artifact.path);
           await fs.mkdir(path.dirname(destination), { recursive: true });
           await fs.rename(source, destination);
@@ -479,7 +516,9 @@ export async function rotateRunnerToken(id: string) {
   const runner = await withQueueLock("queue", () =>
     runnersRepository.rotate(id, issued.hash)
   );
-  if (!runner) throw new HTTPException(404, { message: "Runner not found" });
+  if (!runner) {
+    throw new HTTPException(404, { message: "Runner not found" });
+  }
   const { closeRunnerTunnels } = await import("../tunnel/registry");
   closeRunnerTunnels(id);
   events.emit("work");
@@ -490,7 +529,9 @@ export async function cancelRunnerBatch(batchId: string): Promise<boolean> {
   const job = (await runnersRepository.pending()).find(
     (row) => row.batchId === batchId
   );
-  if (!job) return false;
+  if (!job) {
+    return false;
+  }
   return jobLocks.run(job.id, () =>
     withQueueLock("queue", () => runnersRepository.cancelBatch(batchId))
   );
@@ -536,17 +577,21 @@ async function failRunnerJob(
 }
 
 function failureReason(job: RunnerJob): string | null {
-  if (runnerJobDeadline(job) <= Date.now())
+  if (runnerJobDeadline(job) <= Date.now()) {
     return job.status === "queued"
       ? `Runner work expired after waiting ${Math.round(runnerQueueTimeoutMs() / 1000)}s for a runner${job.group ? ` in group ${job.group}` : ""}.${job.lastFailure ? ` ${job.lastFailure}` : ""}`
       : `Runner execution expired after ${Math.round((job.payload.timeoutMs + RUNNER_EXECUTION_GRACE_MS) / 1000)}s. No runner completed this work.${job.lastFailure ? ` ${job.lastFailure}` : ""}`;
-  if (job.status === "queued" && job.attempts >= MAX_RUNNER_ATTEMPTS)
+  }
+  if (job.status === "queued" && job.attempts >= MAX_RUNNER_ATTEMPTS) {
     return `Runner work stopped after ${MAX_RUNNER_ATTEMPTS} attempts.${job.lastFailure ? ` ${job.lastFailure}` : " Runners repeatedly disconnected before completion."}`;
+  }
   return null;
 }
 
 export function maintainRunnerQueue(): Promise<void> {
-  if (maintenance) return maintenance;
+  if (maintenance) {
+    return maintenance;
+  }
   maintenance = (async () => {
     await withQueueLock("queue", () =>
       runnersRepository.reclaim(new Date().toISOString(), [
@@ -564,18 +609,23 @@ export function maintainRunnerQueue(): Promise<void> {
         jobLocks.run(job.id, async () => {
           const current = await withQueueLock("queue", async () => {
             const row = await runnersRepository.job(job.id);
-            if (!row || row.status === "completed" || !failureReason(row))
+            if (!row || row.status === "completed" || !failureReason(row)) {
               return null;
+            }
             await runnersRepository.reserveCompletion(row.id);
             return row;
           });
-          if (current) await failRunnerJob(current, failureReason(current)!);
+          if (current) {
+            await failRunnerJob(current, failureReason(current)!);
+          }
         })
       )
     );
     for (let index = 0; index < results.length; index++) {
       const result = results[index];
-      if (result.status !== "rejected") continue;
+      if (result.status !== "rejected") {
+        continue;
+      }
       const job = jobs[index];
       logger.error("runner maintenance could not finish work", {
         jobId: job.id,
@@ -610,7 +660,9 @@ export async function recoverRunnerCompletions(): Promise<void> {
 }
 
 export function startRunnerLeaseMonitor(): void {
-  if (monitor) return;
+  if (monitor) {
+    return;
+  }
   monitor = setInterval(() => {
     void maintainRunnerQueue().catch((error: unknown) =>
       logger.error("could not reclaim runner leases", { error })
@@ -620,6 +672,8 @@ export function startRunnerLeaseMonitor(): void {
 }
 
 export function stopRunnerLeaseMonitor(): void {
-  if (monitor) clearInterval(monitor);
+  if (monitor) {
+    clearInterval(monitor);
+  }
   monitor = undefined;
 }

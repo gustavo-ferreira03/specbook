@@ -38,7 +38,9 @@ export async function proposalFiles(item: InboxItem): Promise<ProposalFile[]> {
       { path: "spec.ts", before: null, after: proposed.testSource },
     ];
   }
-  if (item.kind !== "spec_fix") return [];
+  if (item.kind !== "spec_fix") {
+    return [];
+  }
   const patch = fixProposalSchema.parse(payloadOf(item).params);
   const before = {
     yaml: payloadOf(item).before?.yaml ?? "",

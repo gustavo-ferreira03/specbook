@@ -34,8 +34,9 @@ export function createReplayImageRecorder(
     blocked(image: HTMLImageElement): boolean {
       let element: Element | null = image;
       while (element) {
-        if (element.matches(".__specbookSecret, [data-specbook-secret]"))
+        if (element.matches(".__specbookSecret, [data-specbook-secret]")) {
           return true;
+        }
         const root = element.getRootNode();
         element = element.parentElement ?? ((root as ShadowRoot).host || null);
       }
@@ -48,8 +49,9 @@ export function createReplayImageRecorder(
         !image.complete ||
         !image.naturalWidth ||
         !image.naturalHeight
-      )
+      ) {
         return;
+      }
       const rectangle = image.getBoundingClientRect();
       const ratio = Math.min(
         2,
@@ -64,8 +66,12 @@ export function createReplayImageRecorder(
               rectangle.height / image.naturalHeight
             )
           : 1;
-      if (fit === "none") scale = 1;
-      if (fit === "scale-down") scale = Math.min(1, scale);
+      if (fit === "none") {
+        scale = 1;
+      }
+      if (fit === "scale-down") {
+        scale = Math.min(1, scale);
+      }
       scale = Math.min(1, scale * ratio);
       const fill =
         fit === "fill" && rectangle.width > 0 && rectangle.height > 0;
@@ -87,7 +93,9 @@ export function createReplayImageRecorder(
       );
       const key = `${image.currentSrc || image.src}:${image.naturalWidth}:${image.naturalHeight}:${width}:${height}`;
       const previous = state.get(image);
-      if (previous?.key === key) return previous.data;
+      if (previous?.key === key) {
+        return previous.data;
+      }
       try {
         canvas.width = width;
         canvas.height = height;
@@ -95,7 +103,9 @@ export function createReplayImageRecorder(
         context.drawImage(image, 0, 0, width, height);
         // Keep fine detail when the replay is enlarged.
         const data = canvas.toDataURL("image/webp", 0.92);
-        if (!data.startsWith("data:image/webp;")) return;
+        if (!data.startsWith("data:image/webp;")) {
+          return;
+        }
         state.set(image, { key, data });
         return data;
       } catch {
@@ -103,15 +113,21 @@ export function createReplayImageRecorder(
       }
     },
     refresh(image: HTMLImageElement): void {
-      if (stopped || !image.isConnected) return;
+      if (stopped || !image.isConnected) {
+        return;
+      }
       const before = state.get(image)?.data;
       const previousLayout = layouts.get(image);
       const data = images.encode(image);
       const id = mirror.getId(image);
-      if (!data || id < 0) return;
+      if (!data || id < 0) {
+        return;
+      }
       const attributes: ImageAttributes = {};
       images.output(image, attributes, data, true);
-      if (data === before && layouts.get(image) === previousLayout) return;
+      if (data === before && layouts.get(image) === previousLayout) {
+        return;
+      }
       deliver({
         type: 3,
         timestamp: Date.now(),
@@ -135,15 +151,19 @@ export function createReplayImageRecorder(
     ): void {
       attributes.src = data;
       attributes.rr_dataURL = data;
-      if (incremental) attributes.srcset = null;
-      else delete attributes.srcset;
+      if (incremental) {
+        attributes.srcset = null;
+      } else {
+        delete attributes.srcset;
+      }
       const computed = image.ownerDocument.defaultView?.getComputedStyle(image);
       if (
         !computed ||
         !parseFloat(computed.width) ||
         !parseFloat(computed.height)
-      )
+      ) {
         return;
+      }
       // New intrinsic image dimensions must not alter auto sizing or aspect ratios.
       const originalStyle =
         typeof attributes.style === "string"
@@ -158,27 +178,38 @@ export function createReplayImageRecorder(
       attributes: ImageAttributes | undefined,
       incremental = false
     ): void {
-      if (id === undefined || !attributes) return;
-      const node = mirror.getNode(id);
-      if (!node || node.nodeType !== 1 || (node as Element).tagName !== "IMG")
+      if (id === undefined || !attributes) {
         return;
+      }
+      const node = mirror.getNode(id);
+      if (!node || node.nodeType !== 1 || (node as Element).tagName !== "IMG") {
+        return;
+      }
       const image = node as HTMLImageElement;
-      if (images.blocked(image)) return;
+      if (images.blocked(image)) {
+        return;
+      }
       if (!tracked.has(image)) {
         tracked.add(image);
         observer.observe(image);
         image.addEventListener("load", images.load);
       }
       const data = images.encode(image);
-      if (data) images.output(image, attributes, data, incremental);
+      if (data) {
+        images.output(image, attributes, data, incremental);
+      }
     },
     node(node: SerializedImageNode): void {
-      if (node.tagName === "img") images.attributes(node.id, node.attributes);
+      if (node.tagName === "img") {
+        images.attributes(node.id, node.attributes);
+      }
       node.childNodes?.forEach((child) => images.node(child));
     },
     prune(): void {
       tracked.forEach((image) => {
-        if (image.isConnected) return;
+        if (image.isConnected) {
+          return;
+        }
         observer.unobserve(image);
         image.removeEventListener("load", images.load);
         tracked.delete(image);

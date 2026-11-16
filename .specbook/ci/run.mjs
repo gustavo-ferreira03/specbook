@@ -32,18 +32,22 @@ async function api(method, route, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const setCookies = response.headers.getSetCookie();
-  if (setCookies.length)
+  if (setCookies.length) {
     cookie = setCookies.map((value) => value.split(";")[0]).join("; ");
+  }
   const text = await response.text();
-  if (!response.ok)
+  if (!response.ok) {
     throw new Error(`${method} ${route} returned ${response.status}: ${text}`);
+  }
   return text ? JSON.parse(text) : {};
 }
 
 async function waitFor(url) {
   for (let attempt = 0; attempt < 90; attempt++) {
     try {
-      if ((await fetch(url)).ok) return;
+      if ((await fetch(url)).ok) {
+        return;
+      }
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
@@ -112,13 +116,15 @@ const expected = specCount(path.join(book, "specs"));
 let indexed = 0;
 for (let attempt = 0; attempt < 30 && indexed < expected; attempt++) {
   indexed = (await api("GET", `/projects/${project.id}/tree`)).specs.length;
-  if (indexed < expected)
+  if (indexed < expected) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
 }
-if (indexed !== expected)
+if (indexed !== expected) {
   throw new Error(
     `Expected ${expected} Specs after the push, found ${indexed}`
   );
+}
 console.log(`Specbook: ${indexed} Specs pushed to the tester project`);
 
 const { token: ciToken } = await api(

@@ -36,15 +36,18 @@ const updateFeatureSchema = z
   );
 
 function mapManualError(error: unknown): never {
-  if (error instanceof HTTPException) throw error;
+  if (error instanceof HTTPException) {
+    throw error;
+  }
   if (
     error instanceof ResourceBusyError ||
     error instanceof UnsafeRepoPathError
   ) {
     throw new HTTPException(409, { message: error.message });
   }
-  if (error instanceof YamlParseError)
+  if (error instanceof YamlParseError) {
     throw new HTTPException(400, { message: error.message });
+  }
   if (
     error instanceof Error &&
     /unfinished rebase|uncommitted changes/.test(error.message)
@@ -63,8 +66,9 @@ export function createFeaturesRouter(): Hono {
     zValidator("json", createFeatureSchema),
     async (c) => {
       const project = await projectsRepository.getProject(c.req.param("id"));
-      if (!project)
+      if (!project) {
         throw new HTTPException(404, { message: "Project not found" });
+      }
       const { parentId, title, description } = c.req.valid("json");
       if (parentId) {
         const parent = await featuresRepository.getFeature(parentId);
@@ -88,8 +92,9 @@ export function createFeaturesRouter(): Hono {
     zValidator("json", updateFeatureSchema),
     async (c) => {
       const feature = await featuresRepository.getFeature(c.req.param("id"));
-      if (!feature)
+      if (!feature) {
         throw new HTTPException(404, { message: "Feature not found" });
+      }
       const updated = await updateFeatureInRepo(
         feature,
         c.req.valid("json")
@@ -100,8 +105,9 @@ export function createFeaturesRouter(): Hono {
 
   router.get("/features/:id/file", access("viewer"), async (c) => {
     const feature = await featuresRepository.getFeature(c.req.param("id"));
-    if (!feature)
+    if (!feature) {
       throw new HTTPException(404, { message: "Feature not found" });
+    }
     return c.json({ feature, yaml: await readFeatureRaw(feature) });
   });
 
@@ -111,8 +117,9 @@ export function createFeaturesRouter(): Hono {
     zValidator("json", editFileSchema),
     async (c) => {
       const feature = await featuresRepository.getFeature(c.req.param("id"));
-      if (!feature)
+      if (!feature) {
         throw new HTTPException(404, { message: "Feature not found" });
+      }
       const updated = await editFeatureFile(
         feature,
         c.req.valid("json").yaml

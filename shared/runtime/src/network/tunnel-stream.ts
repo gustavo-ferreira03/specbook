@@ -102,7 +102,9 @@ export class TunnelMultiplexer {
         this.remotePaused.delete(id);
         const write = this.blockedWrites.get(id);
         this.blockedWrites.delete(id);
-        if (write) write(new Error("Tunnel connection closed"));
+        if (write) {
+          write(new Error("Tunnel connection closed"));
+        }
         this.send({ type: "close", id });
         const pending = this.pending.get(id);
         if (pending) {
@@ -125,8 +127,9 @@ export class TunnelMultiplexer {
   }
 
   async connect(origin: string): Promise<Duplex> {
-    if (this.stopped || this.streams.size >= 256)
+    if (this.stopped || this.streams.size >= 256) {
       throw new Error("Tunnel connection unavailable");
+    }
     const id = randomUUID();
     this.stream(id);
     return new Promise<Duplex>((resolve, reject) => {
@@ -140,13 +143,17 @@ export class TunnelMultiplexer {
       timer.unref();
       this.pending.set(id, { resolve, reject, timer });
       this.send({ type: "open", id, origin }, (error) => {
-        if (error) this.streams.get(id)?.destroy(error);
+        if (error) {
+          this.streams.get(id)?.destroy(error);
+        }
       });
     });
   }
 
   private async receive(frame: TunnelFrame): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
     if (frame.type === "open") {
       if (
         !this.accept ||
@@ -166,7 +173,9 @@ export class TunnelMultiplexer {
         upstream.on("error", () => stream.destroy());
         stream.on("close", () => upstream.destroy());
         upstream.on("close", (failed: boolean) => {
-          if (failed || !upstream.readableEnded) stream.destroy();
+          if (failed || !upstream.readableEnded) {
+            stream.destroy();
+          }
         });
         upstream.pipe(stream);
         stream.pipe(upstream);
@@ -178,7 +187,9 @@ export class TunnelMultiplexer {
       return;
     }
     const stream = this.streams.get(frame.id);
-    if (!stream) return;
+    if (!stream) {
+      return;
+    }
     const pending = this.pending.get(frame.id);
     switch (frame.type) {
       case "opened":
@@ -203,7 +214,9 @@ export class TunnelMultiplexer {
         ) {
           this.socket.close(1008, "Tunnel backpressure limit exceeded");
           this.close();
-        } else stream.emit("tunnel-data", chunk);
+        } else {
+          stream.emit("tunnel-data", chunk);
+        }
         break;
       }
       case "end":
@@ -226,10 +239,13 @@ export class TunnelMultiplexer {
   }
 
   close(): void {
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
     this.stopped = true;
-    for (const stream of this.streams.values())
+    for (const stream of this.streams.values()) {
       stream.destroy(new Error("Tunnel connection closed"));
+    }
     this.streams.clear();
   }
 }

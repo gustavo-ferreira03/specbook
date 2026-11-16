@@ -22,6 +22,8 @@ export const db = drizzle(client, { schema });
 export type DbQuery = BatchItem<"sqlite">;
 
 export async function runBatch(queries: DbQuery[]): Promise<void> {
-  if (queries.length === 0) return;
+  if (queries.length === 0) {
+    return;
+  }
   await db.batch(queries as [DbQuery, ...DbQuery[]]);
 }

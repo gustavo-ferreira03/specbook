@@ -81,14 +81,19 @@ class RunnersRepository {
     mode: "runner" | "tunnel" = "runner"
   ): Promise<void> {
     const existing = await this.instance(instanceId);
-    if (existing && (existing.runnerId !== runnerId || existing.mode !== mode))
+    if (
+      existing &&
+      (existing.runnerId !== runnerId || existing.mode !== mode)
+    ) {
       throw new HTTPException(403, {
         message: "Runner instance belongs to another connection",
       });
-    if (existing?.disconnectedAt)
+    }
+    if (existing?.disconnectedAt) {
       throw new HTTPException(409, {
         message: "Runner instance disconnected. Restart the CLI process.",
       });
+    }
     const row = {
       id: instanceId,
       runnerId,
@@ -111,10 +116,11 @@ class RunnersRepository {
         ),
       })
       .returning({ id: runnerInstances.id });
-    if (!updated.length)
+    if (!updated.length) {
       throw new HTTPException(409, {
         message: "Runner instance disconnected. Restart the CLI process.",
       });
+    }
   }
 
   async disconnect(runnerId: string, instanceId: string): Promise<void> {
@@ -380,7 +386,9 @@ class RunnersRepository {
     instanceId = runner.id,
     activeCompletionIds: string[] = []
   ): Promise<RunnerJob | null> {
-    if (runner.purpose !== "runner") return null;
+    if (runner.purpose !== "runner") {
+      return null;
+    }
     await this.reclaim(new Date().toISOString(), activeCompletionIds);
     const instance = await this.instance(instanceId);
     if (
@@ -388,8 +396,9 @@ class RunnersRepository {
       instance.runnerId !== runner.id ||
       instance.mode !== "runner" ||
       instance.disconnectedAt
-    )
+    ) {
       return null;
+    }
     const [{ active }] = await db
       .select({ active: count() })
       .from(runnerJobs)
@@ -399,7 +408,9 @@ class RunnersRepository {
           inArray(runnerJobs.status, ["leased", "completing"])
         )
       );
-    if (active >= instance.concurrency) return null;
+    if (active >= instance.concurrency) {
+      return null;
+    }
     const matchingGroup = runner.group
       ? eq(runnerJobs.group, runner.group)
       : isNull(runnerJobs.group);
@@ -424,7 +435,9 @@ class RunnersRepository {
         .orderBy(asc(runnerJobs.createdAt))
         .limit(1)
     )[0];
-    if (!candidate) return null;
+    if (!candidate) {
+      return null;
+    }
     const updated = await db
       .update(runnerJobs)
       .set({

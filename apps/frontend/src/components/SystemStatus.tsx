@@ -25,8 +25,9 @@ export function SystemStatus() {
       const response = await fetch(`${API_URL}/ready`, {
         credentials: "include",
       });
-      if (response.status !== 200 && response.status !== 503)
+      if (response.status !== 200 && response.status !== 503) {
         throw new Error("System status could not load. Try again.");
+      }
       setStatus((await response.json()) as SystemReadiness);
     } catch (reason) {
       setError(

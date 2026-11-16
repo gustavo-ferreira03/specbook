@@ -138,13 +138,15 @@ function iconCandidates(html: string, pageUrl: URL): URL[] {
       if (
         !href ||
         !rel.some((value) => value === "icon" || value === "apple-touch-icon")
-      )
+      ) {
         return [];
+      }
       if (
         /\.svg(?:[?#]|$)/i.test(href) ||
         /svg/i.test(attribute(tag, "type") ?? "")
-      )
+      ) {
         return [];
+      }
       return [{ href, score: rel.includes("apple-touch-icon") ? 1 : 0 }];
     })
     .sort((a, b) => a.score - b.score);
@@ -186,8 +188,9 @@ async function discover(baseUrl: string): Promise<Favicon | null> {
       contentType &&
       ICON_TYPES.has(contentType) &&
       icon.body.length > 0
-    )
+    ) {
       return { contentType, body: icon.body };
+    }
   }
   return null;
 }
@@ -214,13 +217,19 @@ export async function projectFavicon(
     Date.now() - meta.fetchedAt <
       (meta.contentType ? FOUND_TTL_MS : MISSING_TTL_MS)
   ) {
-    if (!meta.contentType) return null;
+    if (!meta.contentType) {
+      return null;
+    }
     const body = await fs.readFile(file).catch(() => null);
-    if (body) return { contentType: meta.contentType, body };
+    if (body) {
+      return { contentType: meta.contentType, body };
+    }
   }
   const icon = await discover(baseUrl);
   await fs.mkdir(faviconsDir, { recursive: true });
-  if (icon) await fs.writeFile(file, icon.body);
+  if (icon) {
+    await fs.writeFile(file, icon.body);
+  }
   await fs.writeFile(
     `${file}.json`,
     JSON.stringify({

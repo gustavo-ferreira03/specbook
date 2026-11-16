@@ -35,7 +35,9 @@ const decompress = promisify(gunzip);
 export async function decodeReplay(
   data: Buffer
 ): Promise<ReplayEvent[] | null> {
-  if (data.length > MAX_REPLAY_BYTES) return null;
+  if (data.length > MAX_REPLAY_BYTES) {
+    return null;
+  }
   try {
     const raw = await decompress(data, {
       maxOutputLength: MAX_REPLAY_RAW_BYTES,
@@ -51,19 +53,26 @@ export async function encodeReplay(
 ): Promise<Buffer | null> {
   try {
     const source = restoreReplayEvents(events);
-    if (!source) return null;
+    if (!source) {
+      return null;
+    }
     const sorted = JSON.stringify(
       source.sort((left, right) => left.timestamp - right.timestamp)
     );
-    if (Buffer.byteLength(sorted) > MAX_REPLAY_RAW_BYTES) return null;
+    if (Buffer.byteLength(sorted) > MAX_REPLAY_RAW_BYTES) {
+      return null;
+    }
     const packed = packReplayEvents(JSON.parse(sorted));
-    if (!packed) return null;
+    if (!packed) {
+      return null;
+    }
     const raw = JSON.stringify(packed);
     if (
       Buffer.byteLength(raw) > MAX_REPLAY_RAW_BYTES ||
       !restoreReplayEvents(JSON.parse(raw))
-    )
+    ) {
       return null;
+    }
     const data = await compress(raw, { level: 6 });
     return data.length <= MAX_REPLAY_BYTES ? data : null;
   } catch {
@@ -77,12 +86,15 @@ export async function readReplay(
   try {
     const file = path.join(directory, REPLAY_FILE);
     const stat = await fs.lstat(file);
-    if (!stat.isFile() || stat.size > MAX_REPLAY_BYTES) return null;
+    if (!stat.isFile() || stat.size > MAX_REPLAY_BYTES) {
+      return null;
+    }
     if (
       (await fs.realpath(file)) !==
       path.join(await fs.realpath(directory), REPLAY_FILE)
-    )
+    ) {
       return null;
+    }
     return decodeReplay(await fs.readFile(file));
   } catch {
     return null;

@@ -28,8 +28,12 @@ export interface AgentMessage {
 
 export function extractText(message: AgentMessage | undefined): string {
   const content = message?.content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
   return content
     .filter(
       (part): part is { type: string; text: string } =>
@@ -70,22 +74,30 @@ async function refreshSessionPaths(): Promise<void> {
   const names = await fs.readdir(sessionsDir);
   for (const name of names) {
     const match = /_([^_]+)\.jsonl$/.exec(name);
-    if (match) sessionPaths.set(match[1], path.join(sessionsDir, name));
+    if (match) {
+      sessionPaths.set(match[1], path.join(sessionsDir, name));
+    }
   }
 }
 
 async function resolveSessionPath(id: string): Promise<string | null> {
   const cached = sessionPaths.get(id);
-  if (cached && (await fileExists(cached))) return cached;
+  if (cached && (await fileExists(cached))) {
+    return cached;
+  }
   sessionPaths.delete(id);
   await refreshSessionPaths();
   const found = sessionPaths.get(id);
-  if (found && (await fileExists(found))) return found;
+  if (found && (await fileExists(found))) {
+    return found;
+  }
   sessionPaths.delete(id);
   const info = (await SessionManager.list(cwd, sessionsDir)).find(
     (session) => session.id === id
   );
-  if (!info) return null;
+  if (!info) {
+    return null;
+  }
   sessionPaths.set(id, info.path);
   return info.path;
 }
@@ -104,11 +116,17 @@ export async function openSession(id: string): Promise<SessionManager | null> {
 
 function sessionTitle(sessionManager: SessionManager): string {
   const name = sessionManager.getSessionName()?.trim();
-  if (name && name !== DEFAULT_TITLE) return name;
+  if (name && name !== DEFAULT_TITLE) {
+    return name;
+  }
   for (const entry of sessionManager.getEntries()) {
-    if (entry.type !== "message" || entry.message.role !== "user") continue;
+    if (entry.type !== "message" || entry.message.role !== "user") {
+      continue;
+    }
     const text = extractText(entry.message as AgentMessage).trim();
-    if (text) return chatTitle(text);
+    if (text) {
+      return chatTitle(text);
+    }
   }
   return DEFAULT_TITLE;
 }
@@ -124,12 +142,21 @@ export function chatTitle(text: string): string {
 
 async function cachedTitle(id: string): Promise<string> {
   const sessionPath = await resolveSessionPath(id);
-  if (!sessionPath) return DEFAULT_TITLE;
+  if (!sessionPath) {
+    return DEFAULT_TITLE;
+  }
   const stats = await fs.stat(sessionPath).catch(() => null);
-  if (!stats) return DEFAULT_TITLE;
+  if (!stats) {
+    return DEFAULT_TITLE;
+  }
   const cached = titles.get(id);
-  if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size)
+  if (
+    cached &&
+    cached.mtimeMs === stats.mtimeMs &&
+    cached.size === stats.size
+  ) {
     return cached.title;
+  }
   const title = sessionTitle(
     SessionManager.open(sessionPath, sessionsDir, cwd)
   );
@@ -150,7 +177,9 @@ export function ensureUserMessage(
   userText: string,
   previousCount: number
 ): void {
-  if (userMessageCount(sessionManager) > previousCount) return;
+  if (userMessageCount(sessionManager) > previousCount) {
+    return;
+  }
   sessionManager.appendMessage({
     role: "user",
     content: userText,
@@ -179,10 +208,14 @@ export async function branchSessionForTurn(
   messageId: string,
   options: { editedText?: string; userOnly?: boolean } = {}
 ): Promise<{ text: string; sessionManager: SessionManager }> {
-  if (isChatDeleting(id)) throw new Error("Chat is being deleted");
+  if (isChatDeleting(id)) {
+    throw new Error("Chat is being deleted");
+  }
 
   const sessionManager = await openSession(id);
-  if (!sessionManager) throw new Error("Chat not found");
+  if (!sessionManager) {
+    throw new Error("Chat not found");
+  }
 
   const branch = sessionManager.getBranch();
   const targetIndex = branch.findIndex((entry) => entry.id === messageId);
@@ -212,9 +245,14 @@ export async function branchSessionForTurn(
     }
   }
 
-  if (!text.trim()) throw new Error("Message has no text to send");
-  if (branchFromId) sessionManager.branch(branchFromId);
-  else sessionManager.resetLeaf();
+  if (!text.trim()) {
+    throw new Error("Message has no text to send");
+  }
+  if (branchFromId) {
+    sessionManager.branch(branchFromId);
+  } else {
+    sessionManager.resetLeaf();
+  }
   sessionManager.appendCustomEntry("specbook-retry", { messageId });
   flushSessionFile(sessionManager);
   publishChatUpdate(id);
@@ -224,7 +262,9 @@ export async function branchSessionForTurn(
 export async function removeChatSession(id: string): Promise<void> {
   const sessionPath = await resolveSessionPath(id);
   forgetSession(id);
-  if (!sessionPath) return;
+  if (!sessionPath) {
+    return;
+  }
   const root = path.resolve(sessionsDir);
   const resolved = path.resolve(sessionPath);
   const relative = path.relative(root, resolved);
@@ -246,12 +286,16 @@ export async function createChat(
   await fs.mkdir(sessionsDir, { recursive: true });
   const id = crypto.randomUUID();
   const sessionManager = SessionManager.create(cwd, sessionsDir, { id });
-  if (title) sessionManager.appendSessionInfo(title);
+  if (title) {
+    sessionManager.appendSessionInfo(title);
+  }
   flushSessionFile(sessionManager);
   const sessionId = sessionManager.getSessionId();
   const sessionFile = sessionManager.getSessionFile();
   titles.delete(sessionId);
-  if (sessionFile) sessionPaths.set(sessionId, sessionFile);
+  if (sessionFile) {
+    sessionPaths.set(sessionId, sessionFile);
+  }
   await chatsRepository.insertChat(sessionId, projectId, metadata);
   return { id: sessionId };
 }
@@ -306,11 +350,17 @@ export function messagesOf(
       }
       continue;
     }
-    if (entry.type !== "message") continue;
+    if (entry.type !== "message") {
+      continue;
+    }
     const role = entry.message.role;
-    if (role !== "user" && role !== "assistant") continue;
+    if (role !== "user" && role !== "assistant") {
+      continue;
+    }
     const content = extractText(entry.message as AgentMessage).trim();
-    if (!content) continue;
+    if (!content) {
+      continue;
+    }
     messages.push({
       id: entry.id,
       chatId: id,
@@ -333,13 +383,16 @@ export function toolStepsOf(
   for (const entry of branch) {
     if (entry.type === "message" && entry.message.role === "assistant") {
       for (const part of entry.message.content) {
-        if (part.type === "toolCall")
+        if (part.type === "toolCall") {
           calls.set(part.id, `${entry.id}:${part.id}`);
+        }
       }
     }
     if (entry.type === "message" && entry.message.role === "toolResult") {
       const id = calls.get(entry.message.toolCallId);
-      if (id) results.set(id, entry.message.timestamp);
+      if (id) {
+        results.set(id, entry.message.timestamp);
+      }
     }
     if (entry.type === "custom" && entry.customType === TOOL_STEP_TYPE) {
       const step = entry.data as ChatToolStepRecord;
@@ -356,7 +409,9 @@ export function toolStepsOf(
     ) {
       afterMessageId = entry.id;
     }
-    if (entry.type !== "message") continue;
+    if (entry.type !== "message") {
+      continue;
+    }
     const message = entry.message;
     if (
       (message.role === "user" || message.role === "assistant") &&
@@ -364,12 +419,18 @@ export function toolStepsOf(
     ) {
       afterMessageId = entry.id;
     }
-    if (message.role !== "assistant") continue;
+    if (message.role !== "assistant") {
+      continue;
+    }
     for (const part of message.content) {
-      if (part.type !== "toolCall") continue;
+      if (part.type !== "toolCall") {
+        continue;
+      }
       const id = `${entry.id}:${part.id}`;
       const timing = timings.get(id);
-      if (!timing && !results.has(id)) continue;
+      if (!timing && !results.has(id)) {
+        continue;
+      }
       steps.push({
         id,
         toolName: part.name,
@@ -395,7 +456,9 @@ export async function getChatView(id: string): Promise<{
   toolSteps: ChatToolStepRecord[];
 } | null> {
   const sessionManager = await openSession(id);
-  if (!sessionManager) return null;
+  if (!sessionManager) {
+    return null;
+  }
   return {
     title: sessionTitle(sessionManager),
     messages: messagesOf(id, sessionManager),

@@ -42,7 +42,9 @@ export async function acceptCiTrigger(
     );
   }
   const project = await projectsRepository.getProject(projectId);
-  if (!project) throw new CiRequestError("Project not found", 404);
+  if (!project) {
+    throw new CiRequestError("Project not found", 404);
+  }
   try {
     const environment = await resolveRunEnvironment(projectId, name, target);
     await projectRunPolicy(
@@ -53,8 +55,9 @@ export async function acceptCiTrigger(
     );
     return environment;
   } catch (error) {
-    if (error instanceof NetworkTargetError)
+    if (error instanceof NetworkTargetError) {
       throw new CiRequestError(error.message, 400);
+    }
     throw error;
   }
 }
@@ -74,22 +77,26 @@ export async function startCiRun(
   let specs = await specsRepository.listSpecs(projectId);
   if (input.featureId) {
     const feature = await featuresRepository.getFeature(input.featureId);
-    if (!feature || feature.projectId !== projectId)
+    if (!feature || feature.projectId !== projectId) {
       throw new CiRequestError("Feature not found in this project", 400);
+    }
     const selected = new Set(
       await featuresRepository.getFeatureDeletionSpecIds(feature.id)
     );
     specs = specs.filter((spec) => selected.has(spec.id));
   }
   if (input.specIds) {
-    if (input.specIds.some((id) => !specs.some((spec) => spec.id === id)))
+    if (input.specIds.some((id) => !specs.some((spec) => spec.id === id))) {
       throw new CiRequestError(
         "Selected Specs must belong to this project",
         400
       );
+    }
     specs = specs.filter((spec) => input.specIds!.includes(spec.id));
   }
-  if (!input.specIds) specs = specs.filter((spec) => spec.status !== "invalid");
+  if (!input.specIds) {
+    specs = specs.filter((spec) => spec.status !== "invalid");
+  }
   try {
     return await startSpecBatch(
       projectId,

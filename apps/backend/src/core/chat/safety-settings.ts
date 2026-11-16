@@ -16,7 +16,9 @@ export async function getSecuritySettings(): Promise<SecuritySettings> {
   const stored = storedSecuritySettingsSchema.parse(
     (await settingsRepository.getSecuritySettings()) ?? {}
   );
-  if (started === generation) current = stored;
+  if (started === generation) {
+    current = stored;
+  }
   return current;
 }
 

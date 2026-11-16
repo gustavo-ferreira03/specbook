@@ -139,7 +139,9 @@ export function InlineFeedback({
 }: {
   feedback: InlineFeedbackValue | null | undefined;
 }) {
-  if (!feedback) return null;
+  if (!feedback) {
+    return null;
+  }
   const success = feedback.type === "success";
   const Icon = success ? Check : AlertCircle;
   return (

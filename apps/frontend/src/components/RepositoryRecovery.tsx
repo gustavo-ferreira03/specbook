@@ -55,7 +55,9 @@ export function RepositoryRecovery({ projectId }: { projectId: string }) {
   }, [load]);
 
   async function save() {
-    if (!recovery?.canSave) return;
+    if (!recovery?.canSave) {
+      return;
+    }
     setSaving(true);
     setFeedback(null);
     try {
@@ -76,7 +78,9 @@ export function RepositoryRecovery({ projectId }: { projectId: string }) {
     }
   }
 
-  if (!recovery?.dirty && !recovery?.blocked && !feedback) return null;
+  if (!recovery?.dirty && !recovery?.blocked && !feedback) {
+    return null;
+  }
   return (
     <>
       <SettingsSection
@@ -121,7 +125,9 @@ export function RepositoryRecovery({ projectId }: { projectId: string }) {
       <Sheet
         open={open}
         onOpenChange={(value) => {
-          if (!saving) setOpen(value);
+          if (!saving) {
+            setOpen(value);
+          }
         }}
       >
         <SheetContent

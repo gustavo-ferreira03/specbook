@@ -15,7 +15,9 @@ export async function resolveSecretOriginPolicy(
   environment?: RunEnvironment
 ): Promise<SecretOriginPolicy> {
   const project = await projectsRepository.getProject(projectId);
-  if (!project) throw new Error("Project not found");
+  if (!project) {
+    throw new Error("Project not found");
+  }
   const productionOrigin = new URL(project.baseUrl).origin;
   const baseOrigin = new URL(environment?.baseUrl ?? project.baseUrl).origin;
   const credentialOrigin = new URL(
@@ -30,10 +32,11 @@ export async function resolveSecretOriginPolicy(
     const target = overrideId
       ? profiles.find((item) => item.id === overrideId)
       : profile;
-    if (!target)
+    if (!target) {
       throw new Error(
         `The credential override for "${profile.name}" no longer exists.`
       );
+    }
     const origins = [
       ...new Set([
         overrideId ? credentialOrigin : productionOrigin,
@@ -42,13 +45,19 @@ export async function resolveSecretOriginPolicy(
     ];
     for (const field of profile.fields) {
       const envName = secretEnvName(profile.name, field.key);
-      if (!wanted.has(envName)) continue;
+      if (!wanted.has(envName)) {
+        continue;
+      }
       const effectiveField = target.fields.find(
         (item) => item.key === field.key
       );
-      if (!effectiveField) continue;
+      if (!effectiveField) {
+        continue;
+      }
       byRef[envName] = origins;
-      if (effectiveField.sensitive === false) publicRefs.push(envName);
+      if (effectiveField.sensitive === false) {
+        publicRefs.push(envName);
+      }
     }
   }
   return {

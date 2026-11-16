@@ -5,10 +5,11 @@ const manifest = JSON.parse(
   await fs.readFile(new URL("../package.json", import.meta.url), "utf8")
 );
 const uiChecksum = process.env.SPECBOOK_UI_RELEASE_SHA256 ?? "";
-if (uiChecksum && !/^[a-f0-9]{64}$/.test(uiChecksum))
+if (uiChecksum && !/^[a-f0-9]{64}$/.test(uiChecksum)) {
   throw new Error(
     "SPECBOOK_UI_RELEASE_SHA256 must be the trusted UI artifact SHA-256"
   );
+}
 await fs.mkdir("dist", { recursive: true });
 await build({
   entryPoints: ["src/index.ts"],

@@ -14,8 +14,9 @@ export async function matchesCurrentSpec(
     spec.status === "invalid" ||
     run.specId !== spec.id ||
     run.sourceHash !== spec.sourceHash
-  )
+  ) {
     return false;
+  }
   const yaml = await fs
     .readFile(path.join(runsDir, run.id, "spec.yml"), "utf8")
     .catch(() => null);

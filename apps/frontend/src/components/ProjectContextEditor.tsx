@@ -116,7 +116,9 @@ function AutoTextarea({
 
   useEffect(() => {
     const element = ref.current;
-    if (!element) return;
+    if (!element) {
+      return;
+    }
     element.style.height = "auto";
     element.style.height = `${element.scrollHeight}px`;
   }, [value]);
@@ -169,7 +171,9 @@ export function ProjectContextEditor({
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!focusTarget) return;
+    if (!focusTarget) {
+      return;
+    }
     const element = containerRef.current?.querySelector<HTMLElement>(
       `[data-focus="${focusTarget}"]`
     );

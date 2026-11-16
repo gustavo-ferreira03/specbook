@@ -19,16 +19,18 @@ export function fileDiff(before: string, after: string) {
     prefix < oldLines.length &&
     prefix < newLines.length &&
     oldLines[prefix] === newLines[prefix]
-  )
+  ) {
     prefix++;
+  }
   let suffix = 0;
   while (
     suffix < oldLines.length - prefix &&
     suffix < newLines.length - prefix &&
     oldLines[oldLines.length - suffix - 1] ===
       newLines[newLines.length - suffix - 1]
-  )
+  ) {
     suffix++;
+  }
   const left = oldLines.slice(prefix, oldLines.length - suffix);
   const right = newLines.slice(prefix, newLines.length - suffix);
   const lines: DiffLine[] = [];
@@ -36,8 +38,12 @@ export function fileDiff(before: string, after: string) {
   let afterLine = 1;
   const add = (kind: DiffLine["kind"], text: string) => {
     lines.push({ kind, text, before: beforeLine, after: afterLine });
-    if (kind !== "added") beforeLine++;
-    if (kind !== "removed") afterLine++;
+    if (kind !== "added") {
+      beforeLine++;
+    }
+    if (kind !== "removed") {
+      afterLine++;
+    }
   };
   oldLines.slice(0, prefix).forEach((line) => add("context", line));
   if (
@@ -87,13 +93,17 @@ export function fileDiff(before: string, after: string) {
     .forEach((line) => add("context", line));
   const ranges: { start: number; end: number }[] = [];
   lines.forEach((line, index) => {
-    if (line.kind === "context") return;
+    if (line.kind === "context") {
+      return;
+    }
     const start = Math.max(0, index - 3);
     const end = Math.min(lines.length, index + 4);
     const previous = ranges.at(-1);
-    if (previous && start <= previous.end)
+    if (previous && start <= previous.end) {
       previous.end = Math.max(previous.end, end);
-    else ranges.push({ start, end });
+    } else {
+      ranges.push({ start, end });
+    }
   });
   const hunks = ranges.map(({ start, end }) => {
     const content = lines.slice(start, end);

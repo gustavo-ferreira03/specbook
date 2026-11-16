@@ -23,7 +23,9 @@ export async function checkPageLocators(
   source: string
 ): Promise<LocatorCheck[]> {
   const validation = analyzeSpecSource(source);
-  if (!validation.ok) throw new Error(validation.error);
+  if (!validation.ok) {
+    throw new Error(validation.error);
+  }
   const tree = parse(source, { sourceType: "module", plugins: ["typescript"] });
   const found: {
     locator: string;
@@ -43,38 +45,44 @@ export async function checkPageLocators(
     bindings: Map<string, t.Node>,
     parent?: t.Node
   ) => {
-    if (node.type === "ArrowFunctionExpression") bindings = new Map(bindings);
+    if (node.type === "ArrowFunctionExpression") {
+      bindings = new Map(bindings);
+    }
     if (
       node.type === "VariableDeclarator" &&
       node.id.type === "Identifier" &&
       node.init
-    )
+    ) {
       bindings.set(node.id.name, node.init);
+    }
     if (isLocatorCall(node)) {
       const chained =
         parent?.type === "MemberExpression" &&
         parent.object === node &&
         parent.property.type === "Identifier" &&
         methods.has(parent.property.name);
-      if (!chained)
+      if (!chained) {
         found.push({
           locator: source.slice(node.start ?? 0, node.end ?? 0),
           node,
           bindings: new Map(bindings),
         });
+      }
     }
     for (const item of Object.values(node)) {
       if (Array.isArray(item)) {
-        for (const child of item)
+        for (const child of item) {
           if (child && typeof child.type === "string")
             walk(child as t.Node, bindings, node);
+        }
       } else if (
         item &&
         typeof item === "object" &&
         "type" in item &&
         typeof item.type === "string"
-      )
+      ) {
         walk(item as t.Node, bindings, node);
+      }
     }
   };
   walk(tree, new Map());
@@ -91,14 +99,16 @@ export async function checkPageLocators(
       case "TemplateLiteral":
         return node.quasis[0]?.value.cooked;
       case "UnaryExpression":
-        if (node.operator === "-" && node.argument.type === "NumericLiteral")
+        if (node.operator === "-" && node.argument.type === "NumericLiteral") {
           return -node.argument.value;
+        }
         break;
       case "ObjectExpression": {
         const result: Record<string, unknown> = Object.create(null);
         for (const property of node.properties) {
-          if (property.type !== "ObjectProperty")
+          if (property.type !== "ObjectProperty") {
             throw new Error("Unsupported locator option");
+          }
           const key =
             property.key.type === "Identifier"
               ? property.key.name
@@ -114,12 +124,17 @@ export async function checkPageLocators(
           item ? value(item, bindings) : null
         );
       case "Identifier":
-        if (node.name === "page") return page;
-        if (bindings.has(node.name))
+        if (node.name === "page") {
+          return page;
+        }
+        if (bindings.has(node.name)) {
           return value(bindings.get(node.name)!, bindings);
+        }
         break;
       case "CallExpression": {
-        if (!isLocatorCall(node)) break;
+        if (!isLocatorCall(node)) {
+          break;
+        }
         const callee = node.callee as t.MemberExpression;
         const target = value(callee.object, bindings) as Page | Locator;
         const method = (callee.property as t.Identifier).name;

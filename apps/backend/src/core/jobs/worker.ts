@@ -47,8 +47,9 @@ async function unfinishedWork(
     (await jobsRepository.actions(job.id)).filter(
       (action) => action.action === "unfinished"
     ).length >= MAX_NUDGES
-  )
+  ) {
     return null;
+  }
   if (
     selected?.specId &&
     selected.attemptsLeft > 0 &&
@@ -63,10 +64,13 @@ async function unfinishedWork(
       job.kind === "regenerate" ||
       (job.kind === "failure_triage" && job.classification === "test_drift")
     )
-  )
+  ) {
     return null;
+  }
   const items = await jobsRepository.itemsForJob(job.id);
-  if (items.some((item) => item.kind === "bug_report")) return null;
+  if (items.some((item) => item.kind === "bug_report")) {
+    return null;
+  }
   const proven = items.some((item) => {
     const verification = verificationOf(item);
     return (
@@ -147,7 +151,7 @@ export async function concludeJobTurn(
         "completed",
         { systemError: null, errorCode: null, stopReason: null, retryAt: null }
       );
-      if (completed)
+      if (completed) {
         await jobsRepository.addItem({
           jobId: job.id,
           projectId: job.projectId,
@@ -156,6 +160,7 @@ export async function concludeJobTurn(
           body,
           payload: { language: "en" },
         });
+      }
     }
   }
 }
@@ -185,7 +190,9 @@ async function executeJob(job: Job): Promise<void> {
       await jobsRepository.transition(job.id, "running", "paused");
       return;
     }
-    if (await cancelStaleTriage(job)) return;
+    if (await cancelStaleTriage(job)) {
+      return;
+    }
     if (!(await canRunAgentJob(job))) {
       await jobsRepository.transition(job.id, "running", "queued", {
         startedAt: null,
@@ -194,17 +201,18 @@ async function executeJob(job: Job): Promise<void> {
       return;
     }
     if (remaining <= 0 || job.actionsUsed >= job.limits.maxActions) {
-      if (job.systemError)
+      if (job.systemError) {
         await retryInfrastructure(
           job,
           job.systemError,
           job.errorCode ?? "infrastructure"
         );
-      else
+      } else {
         await stallJob(
           job,
           "The investigation did not reach a confirmed result."
         );
+      }
     } else {
       deadline = setTimeout(() => {
         void stallJob(
@@ -215,7 +223,9 @@ async function executeJob(job: Job): Promise<void> {
           .catch((error) => logger.error("job deadline failed", { error }));
       }, remaining);
       await jobsRepository.log(job.id, "started");
-      if ((await jobsRepository.get(job.id))?.status !== "running") return;
+      if ((await jobsRepository.get(job.id))?.status !== "running") {
+        return;
+      }
       const environment = await jobEnvironment(job);
       turn = await runChatTurn(
         job.chatId,
@@ -226,17 +236,22 @@ async function executeJob(job: Job): Promise<void> {
         createJobPolicy(job, abort, environment.baseUrl, environment)
       );
     }
-    if (stopped) return;
+    if (stopped) {
+      return;
+    }
     await concludeJobTurn(job, turn);
   } catch (error) {
     const current = await jobsRepository.get(job.id);
-    if (stopped || current?.status !== "running") return;
+    if (stopped || current?.status !== "running") {
+      return;
+    }
     await jobsRepository.log(job.id, "error", await scrub(String(error)));
     const code = errorCodeOf(error);
-    if (code && !isInfrastructureCode(code))
+    if (code && !isInfrastructureCode(code)) {
       await stallJob(job, String(error), code);
-    else
+    } else {
       await retryInfrastructure(job, String(error), code ?? "infrastructure");
+    }
   } finally {
     clearTimeout(deadline);
     await closeChatBrowser(job.chatId).catch(() => undefined);
@@ -255,7 +270,9 @@ async function executeJob(job: Job): Promise<void> {
 }
 
 export async function drainJobs(): Promise<void> {
-  if (stopped) return;
+  if (stopped) {
+    return;
+  }
   if (polling) {
     rerunRequested = true;
     return;
@@ -271,18 +288,29 @@ export async function drainJobs(): Promise<void> {
       Number.isInteger(configured) && configured > 0 ? configured : 2;
     const busyProjects = await jobsRepository.busyProjects([...active.keys()]);
     for (const row of await jobsRepository.queued()) {
-      if (active.size >= limit || stopped) break;
-      if (active.has(row.id)) continue;
+      if (active.size >= limit || stopped) {
+        break;
+      }
+      if (active.has(row.id)) {
+        continue;
+      }
       if (await isAgentPaused(row.projectId)) {
         await jobsRepository.transition(row.id, "queued", "paused");
         continue;
       }
-      if (!(await canRunAgentJob(row)) || (await cancelStaleTriage(row)))
+      if (!(await canRunAgentJob(row)) || (await cancelStaleTriage(row))) {
         continue;
-      if (row.retryAt && Date.parse(row.retryAt) > Date.now()) continue;
-      if (busyProjects.has(row.projectId)) continue;
+      }
+      if (row.retryAt && Date.parse(row.retryAt) > Date.now()) {
+        continue;
+      }
+      if (busyProjects.has(row.projectId)) {
+        continue;
+      }
       const job = await jobsRepository.claim(row.id);
-      if (!job) continue;
+      if (!job) {
+        continue;
+      }
       busyProjects.add(job.projectId);
       if (await isAgentPaused(job.projectId)) {
         await jobsRepository.transition(job.id, "running", "paused", {
@@ -316,7 +344,7 @@ export async function pauseAgentJobs(projectId?: string): Promise<void> {
     ? [{ id: projectId }]
     : await projectsRepository.listProjects();
   const stopping: Promise<unknown>[] = [];
-  for (const project of projects)
+  for (const project of projects) {
     for (const job of await jobsRepository.list(project.id)) {
       if (["queued", "running"].includes(job.status)) {
         const changed = await jobsRepository.transition(
@@ -347,6 +375,7 @@ export async function pauseAgentJobs(projectId?: string): Promise<void> {
         );
       }
     }
+  }
   await Promise.allSettled(stopping);
 }
 
@@ -355,33 +384,38 @@ export async function resumeAgentJobs(projectId?: string): Promise<void> {
     ? [{ id: projectId }]
     : await projectsRepository.listProjects();
   for (const project of projects) {
-    if (await isAgentPaused(project.id)) continue;
+    if (await isAgentPaused(project.id)) {
+      continue;
+    }
     for (const job of await jobsRepository.list(project.id)) {
       if (
         job.status === "paused" &&
         (await jobsRepository.transition(job.id, "paused", "queued"))
-      )
+      ) {
         await jobsRepository.log(
           job.id,
           "resumed",
           "The human resumed the agent."
         );
+      }
     }
   }
-  for (const project of projects)
+  for (const project of projects) {
     if (!(await isAgentPaused(project.id)))
       await processProjectSteward(project.id, false);
+  }
   discoverPendingProjectContexts();
   void drainJobs();
 }
 
 async function recoverProject(projectId: string): Promise<void> {
   const paused = await isAgentPaused(projectId);
-  if (!paused)
+  if (!paused) {
     for (const job of await jobsRepository.list(projectId)) {
       if (job.status === "paused")
         await jobsRepository.transition(job.id, "paused", "queued");
     }
+  }
   const questions = await jobsRepository.itemsByKind(projectId, "question", [
     "pending",
   ]);
@@ -395,7 +429,9 @@ async function recoverProject(projectId: string): Promise<void> {
   );
   for (const item of infrastructure) {
     const job = await jobsRepository.get(item.jobId);
-    if (job?.status !== "blocked") continue;
+    if (job?.status !== "blocked") {
+      continue;
+    }
     await retryInfrastructure(
       job,
       `${item.title}\n${item.body}`,
@@ -406,23 +442,29 @@ async function recoverProject(projectId: string): Promise<void> {
       payload: { ...item.payload, internalRecovery: true },
     });
   }
-  if (paused) return;
+  if (paused) {
+    return;
+  }
   for (const item of questions) {
     if (
       infrastructure.has(item) ||
       Number(payloadOf(item).rulesVersion ?? 1) >= AGENT_RULES_VERSION
-    )
+    ) {
       continue;
+    }
     const job = await jobsRepository.get(item.jobId);
     if (
       job?.status !== "blocked" ||
       !["regenerate", "failure_triage", "generate_spec"].includes(job.kind)
-    )
+    ) {
       continue;
+    }
     const resumed = await jobsRepository.requeue(job, "blocked", {
       pendingMessage: `Specbook updated its rules after you asked "${item.title}". The steps written in a Spec are now authorized, and saved credential profiles can be used to sign in. Your question was closed without a human answer. Re-check whether it still applies under these rules and continue the original goal; ask again only if you are still blocked. Inspect list_inbox before repeating work.`,
     });
-    if (!resumed) continue;
+    if (!resumed) {
+      continue;
+    }
     await jobsRepository.updateItem(item.id, {
       status: "dismissed",
       payload: { ...item.payload, outdatedRules: true },
@@ -437,8 +479,9 @@ async function recoverProject(projectId: string): Promise<void> {
 
 export async function startJobWorker(): Promise<void> {
   await jobsRepository.recover();
-  for (const project of await projectsRepository.listProjects())
+  for (const project of await projectsRepository.listProjects()) {
     await recoverProject(project.id);
+  }
   stopped = false;
   await recoverSpecBatches();
   timer = setInterval(
@@ -457,11 +500,12 @@ export async function stopJobWorker(): Promise<void> {
   clearInterval(timer);
   for (const id of active.keys()) {
     const job = await jobsRepository.get(id);
-    if (job)
+    if (job) {
       await Promise.allSettled([
         abortChatTurn(job.chatId),
         closeChatBrowser(job.chatId),
       ]);
+    }
   }
 }
 

@@ -70,7 +70,9 @@ function tally(outcomes: Outcome[]): RecentRun["counts"] {
     running: 0,
     awaiting_deploy: 0,
   };
-  for (const outcome of outcomes) counts[outcome]++;
+  for (const outcome of outcomes) {
+    counts[outcome]++;
+  }
   return counts;
 }
 
@@ -130,8 +132,9 @@ export async function projectOverview(projectId: string) {
     [...runLists.values()].flat().map((run) => [run.id, run])
   );
   const retries = new Map<string, Run>();
-  for (const run of [...allRuns.values()].reverse())
+  for (const run of [...allRuns.values()].reverse()) {
     if (run.retryOf && !retries.has(run.retryOf)) retries.set(run.retryOf, run);
+  }
   const retryFor = async (run: Run) =>
     !needsRetry(run)
       ? null
@@ -466,7 +469,7 @@ export async function projectOverview(projectId: string) {
   }
 
   const repeatedRuns = new Map<string, RecentRun>();
-  for (const spec of specs)
+  for (const spec of specs) {
     for (const run of runLists.get(spec.id) ?? []) {
       if (run.retryOf || batchRunIds.has(run.id)) continue;
       const outcome = runOutcome(run.status, run);
@@ -539,6 +542,7 @@ export async function projectOverview(projectId: string) {
       if (!running) repeatedRuns.set(key, story);
       recentRuns.push(story);
     }
+  }
   recentRuns.sort(newestFirst);
   const lastCheckedAt =
     Object.values(specHealth)

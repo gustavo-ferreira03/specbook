@@ -3,8 +3,9 @@ const OPTIONS = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 let active = 0;
 
 async function derive(password: string, salt: Buffer): Promise<Buffer> {
-  if (active >= 2)
+  if (active >= 2) {
     throw new Error("Too many sign-in attempts. Wait a moment and try again.");
+  }
   active++;
   try {
     return await new Promise<Buffer>((resolve, reject) =>

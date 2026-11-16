@@ -58,12 +58,16 @@ for (const value of [
   process.env.GITHUB_TOKEN,
   process.env.SPECBOOK_GITLAB_TOKEN,
   process.env.CI_JOB_TOKEN,
-])
+]) {
   if (value) tokens.add(value);
+}
 for (const [index, arg] of process.argv.entries()) {
-  if (arg === "--token" && process.argv[index + 1])
+  if (arg === "--token" && process.argv[index + 1]) {
     tokens.add(process.argv[index + 1]);
-  if (arg.startsWith("--token=")) tokens.add(arg.slice(8));
+  }
+  if (arg.startsWith("--token=")) {
+    tokens.add(arg.slice(8));
+  }
 }
 export function rememberToken(token: string): void {
   tokens.add(token);
@@ -84,7 +88,9 @@ export function redactTokens(text: string): string {
   );
 }
 export async function scrubTokens(text: string): Promise<string> {
-  for (const server of await readServers()) rememberToken(server.token);
+  for (const server of await readServers()) {
+    rememberToken(server.token);
+  }
   return redactTokens(text);
 }
 
@@ -101,10 +107,11 @@ export function normalizeServerUrl(value: string): string {
     url.password ||
     url.search ||
     url.hash
-  )
+  ) {
     throw new Error(
       "Use an HTTP(S) server URL without credentials, query or fragment"
     );
+  }
   return url.href.replace(/\/$/, "");
 }
 
@@ -112,15 +119,17 @@ async function readServers(): Promise<Server[]> {
   const file = path.join(configHome(), "servers.json");
   try {
     const stat = await fs.lstat(file);
-    if (!stat.isFile() || stat.isSymbolicLink())
+    if (!stat.isFile() || stat.isSymbolicLink()) {
       throw new Error("Servers must be a regular file");
+    }
     if (
       process.platform !== "win32" &&
       (stat.mode & 0o077 || stat.uid !== process.getuid?.())
-    )
+    ) {
       throw new Error(
         "Servers file must belong to this user with 0600 permissions"
       );
+    }
     let data: unknown;
     try {
       data = JSON.parse(await fs.readFile(file, "utf8"));
@@ -128,15 +137,18 @@ async function readServers(): Promise<Server[]> {
       throw new Error("Servers file contains invalid JSON");
     }
     const result = serversSchema.safeParse(data);
-    if (!result.success)
+    if (!result.success) {
       throw new Error("Servers file has an invalid structure");
+    }
     for (const server of result.data) {
       normalizeServerUrl(server.url);
       rememberToken(server.token);
     }
     return result.data;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
     throw error;
   }
 }
@@ -145,8 +157,9 @@ async function writeServers(servers: Server[]): Promise<void> {
   const directory = configHome();
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const stat = await fs.lstat(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink())
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error("SPECBOOK_HOME must be a directory, without a symlink");
+  }
   const temporary = path.join(directory, `servers-${randomUUID()}.tmp`);
   try {
     await fs.writeFile(temporary, JSON.stringify(servers, null, 2) + "\n", {
@@ -212,8 +225,9 @@ export async function request(
     (response.status === 404 ||
       (response.ok &&
         response.headers.get("content-type")?.includes("text/html")))
-  )
+  ) {
     response = await send(`${url}/api`);
+  }
   if (!response.ok) {
     const body = await response.text();
     let data: unknown;
@@ -266,8 +280,9 @@ export async function responseJson<T>(
     throw new Error("Specbook returned an invalid JSON response");
   }
   const parsed = schema.safeParse(data);
-  if (!parsed.success)
+  if (!parsed.success) {
     throw new Error("Specbook returned an unexpected response");
+  }
   return parsed.data;
 }
 
@@ -279,19 +294,21 @@ export async function savedServer(url?: string): Promise<Server> {
   const server = normalized
     ? servers.find((item) => equivalent(item.url, normalized))
     : servers.at(-1);
-  if (!server)
+  if (!server) {
     throw new Error(
       normalized
         ? "Log in to this server with specbook login first"
         : "Log in with specbook login <server-url> first"
     );
+  }
   return server;
 }
 
 export async function login(url: string, token: string) {
   rememberToken(token);
-  if (!token || /\s/.test(token) || token.length > 4096)
+  if (!token || /\s/.test(token) || token.length > 4096) {
     throw new Error("Provide one personal access token");
+  }
   const normalized = normalizeServerUrl(url);
   const response = await request({ url: normalized, token }, "/auth/me", {
     frontendFallback: true,
@@ -375,8 +392,9 @@ export async function connect(
 
 async function connected(workspace: string) {
   const config = await loadConfig(workspace);
-  if (!config.remote)
+  if (!config.remote) {
     throw new Error("Connect this workspace with specbook connect first");
+  }
   return {
     remote: config.remote,
     server: await savedServer(config.remote.url),
@@ -401,14 +419,17 @@ async function readState(
         )
       )
     );
-    if (!data.success)
+    if (!data.success) {
       throw new Error("Remote revision file has an invalid structure");
+    }
     return data.data.url === remote.url &&
       data.data.projectId === remote.projectId
       ? data.data
       : empty;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return empty;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return empty;
+    }
     throw error;
   }
 }
@@ -447,7 +468,9 @@ async function localFiles(workspace: string, relative: string) {
         "utf8"
       );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
       throw error;
     }
   };
@@ -462,16 +485,18 @@ function specPath(relative: string): void {
     !/^specs\/(?:[a-zA-Z0-9][a-zA-Z0-9_-]*\/)+[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(
       relative
     )
-  )
+  ) {
     throw new Error("Specbook returned an invalid Spec path");
+  }
 }
 function featurePath(relative: string): void {
   if (
     !/^specs\/[a-zA-Z0-9][a-zA-Z0-9_-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_-]*)*$/.test(
       relative
     )
-  )
+  ) {
     throw new Error("Specbook returned an invalid Feature path");
+  }
 }
 
 export async function pull(workspace: string) {
@@ -498,7 +523,9 @@ export async function pull(workspace: string) {
     const previous = await fs
       .readFile(file, "utf8")
       .catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return null;
+        if (error.code === "ENOENT") {
+          return null;
+        }
         throw error;
       });
     if (
@@ -521,7 +548,9 @@ export async function pull(workspace: string) {
     const anyFile = await fs
       .lstat(await safeWorkspacePath(workspace, spec.path, true))
       .catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return null;
+        if (error.code === "ENOENT") {
+          return null;
+        }
         throw error;
       });
     if (
@@ -535,11 +564,12 @@ export async function pull(workspace: string) {
     }
     const directory = await safeWorkspacePath(workspace, spec.path, true);
     await fs.mkdir(directory, { recursive: true });
-    for (const [name, source] of Object.entries(spec.files))
+    for (const [name, source] of Object.entries(spec.files)) {
       await fs.writeFile(
         await safeWorkspacePath(workspace, `${spec.path}/${name}`, true),
         source
       );
+    }
     state.specs[spec.path] = {
       revision: spec.revision,
       hashes: hashes(spec.files),
@@ -564,7 +594,9 @@ async function verifiedRuns(workspace: string, paths: string[]) {
       .sort()
       .reverse();
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return latest;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return latest;
+    }
     throw error;
   }
   for (const id of entries) {
@@ -577,13 +609,18 @@ async function verifiedRuns(workspace: string, paths: string[]) {
         )
       );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
       throw new Error("A local run record could not be read");
     }
-    for (const result of run.results ?? [])
+    for (const result of run.results ?? []) {
       if (paths.includes(result.path) && !latest.has(result.path))
         latest.set(result.path, { runId: id, result });
-    if (latest.size === paths.length) break;
+    }
+    if (latest.size === paths.length) {
+      break;
+    }
   }
   return latest;
 }
@@ -596,13 +633,16 @@ export async function publish(
   const { remote, server } = await connected(workspace);
   if (options.run) {
     const run = await runLocal(workspace, selector);
-    if (run.status !== "passed")
+    if (run.status !== "passed") {
       throw new Error(
         `Local verification failed; read ${run.report} before publishing`
       );
+    }
   }
   const specs = await listSpecs(workspace, selector);
-  if (!specs.length) throw new Error("No Specs found to publish");
+  if (!specs.length) {
+    throw new Error("No Specs found to publish");
+  }
   const state = await readState(workspace, remote);
   const latest = await verifiedRuns(
     workspace,
@@ -616,20 +656,22 @@ export async function publish(
     if (
       run?.result.status !== "passed" ||
       !equalHashes(run.result.hashes, hashes(files))
-    )
+    ) {
       throw new Error(
         `${spec.path} needs a passing run of its current files. Run specbook run ${spec.path}, or publish with --run`
       );
+    }
     const featurePath = path.posix.dirname(spec.path);
     const source = await fs.readFile(
       await safeWorkspacePath(workspace, `${featurePath}/feature.yml`),
       "utf8"
     );
     const text = JSON.stringify({ files, source });
-    if ((await containsSecret(text)) || (await scrubTokens(text)) !== text)
+    if ((await containsSecret(text)) || (await scrubTokens(text)) !== text) {
       throw new Error(
         "Spec files contain a stored secret; remove tokens and use secret() references for credentials before publishing"
       );
+    }
     input.push({
       path: spec.path,
       baseRevision: state.specs[spec.path]?.revision ?? null,
@@ -663,8 +705,9 @@ export async function publish(
   );
   for (const spec of result.specs) {
     const sent = input.find((entry) => entry.path === spec.path);
-    if (!sent)
+    if (!sent) {
       throw new Error("Specbook returned an unexpected published Spec");
+    }
     state.specs[spec.path] = {
       revision: spec.revision,
       hashes: hashes(sent.files),

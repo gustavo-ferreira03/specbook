@@ -23,7 +23,9 @@ class SpecEnvironmentsRepository {
   }
 
   async awaiting(spec: Spec, environmentId?: string): Promise<boolean> {
-    if (!environmentId) return false;
+    if (!environmentId) {
+      return false;
+    }
     return (await this.list(spec)).some(
       (state) =>
         state.environmentId === environmentId &&
@@ -72,7 +74,9 @@ class SpecEnvironmentsRepository {
         set: row,
       })
       .returning({ specId: specEnvironmentStates.specId });
-    if (updated.length) await this.refresh(spec, status);
+    if (updated.length) {
+      await this.refresh(spec, status);
+    }
   }
 
   async refresh(spec: Spec, fallback?: SpecStatus): Promise<void> {

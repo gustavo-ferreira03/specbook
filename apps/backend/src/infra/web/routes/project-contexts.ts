@@ -34,8 +34,9 @@ const draftPatchSchema = z.object({
 function parseOrigin(url: string): string | null {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return null;
+    }
     return parsed.origin;
   } catch {
     return null;
@@ -47,16 +48,18 @@ export function resolveDiscoveryBrief(
   input: z.infer<typeof discoveryBriefSchema>
 ): DiscoveryBrief {
   const baseOrigin = parseOrigin(baseUrl);
-  if (!baseOrigin)
+  if (!baseOrigin) {
     throw new HTTPException(400, {
       message: "The project base URL is not a valid HTTP origin",
     });
+  }
   const startUrl = input.startUrl ?? baseUrl;
   const startOrigin = parseOrigin(startUrl);
-  if (!startOrigin)
+  if (!startOrigin) {
     throw new HTTPException(400, {
       message: "The start URL must be a valid HTTP URL",
     });
+  }
   if (startOrigin !== baseOrigin) {
     throw new HTTPException(400, {
       message: "The start URL must share the project base URL origin",
@@ -91,8 +94,9 @@ export function createProjectContextsRouter(): Hono {
     zValidator("json", discoveryBriefSchema),
     async (c) => {
       const project = await projectsRepository.getProject(c.req.param("id"));
-      if (!project)
+      if (!project) {
         throw new HTTPException(404, { message: "Project not found" });
+      }
       if ((await resolveRunEnvironment(project.id)).executor === "runner") {
         throw new HTTPException(409, {
           message:
@@ -123,8 +127,9 @@ export function createProjectContextsRouter(): Hono {
 
   router.get("/projects/:id/context", access("viewer"), async (c) => {
     const project = await projectsRepository.getProject(c.req.param("id"));
-    if (!project)
+    if (!project) {
       throw new HTTPException(404, { message: "Project not found" });
+    }
     const [confirmed, draft] = await Promise.all([
       projectContextsRepository.getLatestConfirmedProjectContext(project.id),
       projectContextsRepository.getActiveProjectContextDraft(project.id),
@@ -136,8 +141,9 @@ export function createProjectContextsRouter(): Hono {
     const revision = await projectContextsRepository.getProjectContextRevision(
       c.req.param("id")
     );
-    if (!revision)
+    if (!revision) {
       throw new HTTPException(404, { message: "Context revision not found" });
+    }
     return c.json({ revision });
   });
 
@@ -150,8 +156,9 @@ export function createProjectContextsRouter(): Hono {
         await projectContextsRepository.getProjectContextRevision(
           c.req.param("id")
         );
-      if (!revision)
+      if (!revision) {
         throw new HTTPException(404, { message: "Context revision not found" });
+      }
       if (revision.status !== "draft") {
         throw new HTTPException(409, {
           message: "Only draft context revisions can be edited",
@@ -174,17 +181,19 @@ export function createProjectContextsRouter(): Hono {
     const initial = await projectContextsRepository.getProjectContextRevision(
       c.req.param("id")
     );
-    if (!initial)
+    if (!initial) {
       throw new HTTPException(404, { message: "Context revision not found" });
+    }
     return projectContextsRepository.withProjectContextDraftLock(
       initial.projectId,
       async () => {
         const revision =
           await projectContextsRepository.getProjectContextRevision(initial.id);
-        if (!revision)
+        if (!revision) {
           throw new HTTPException(404, {
             message: "Context revision not found",
           });
+        }
         if (revision.status === "confirmed") {
           await writeContextToRepo(revision.projectId, revision.context).catch(
             mapRepoError
@@ -200,7 +209,9 @@ export function createProjectContextsRouter(): Hono {
           });
         }
         const problem = contextProposalProblem(revision.context);
-        if (problem) throw new HTTPException(400, { message: problem });
+        if (problem) {
+          throw new HTTPException(400, { message: problem });
+        }
         const confirmed = await writeContextToRepo(
           revision.projectId,
           revision.context,
@@ -220,18 +231,22 @@ export function createProjectContextsRouter(): Hono {
     const initial = await projectContextsRepository.getProjectContextRevision(
       c.req.param("id")
     );
-    if (!initial)
+    if (!initial) {
       throw new HTTPException(404, { message: "Context revision not found" });
+    }
     return projectContextsRepository.withProjectContextDraftLock(
       initial.projectId,
       async () => {
         const revision =
           await projectContextsRepository.getProjectContextRevision(initial.id);
-        if (!revision)
+        if (!revision) {
           throw new HTTPException(404, {
             message: "Context revision not found",
           });
-        if (revision.status === "discarded") return c.json({ revision });
+        }
+        if (revision.status === "discarded") {
+          return c.json({ revision });
+        }
         if (revision.status !== "draft") {
           throw new HTTPException(409, {
             message: "Confirmed context revisions cannot be discarded",

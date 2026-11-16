@@ -10,7 +10,9 @@ export function createKeyedLock() {
       try {
         return await current;
       } finally {
-        if (queues.get(key) === current) queues.delete(key);
+        if (queues.get(key) === current) {
+          queues.delete(key);
+        }
       }
     },
   };

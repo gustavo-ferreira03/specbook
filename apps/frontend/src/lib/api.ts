@@ -78,24 +78,28 @@ export function safeReturnPath(value: string | null): string {
     !value?.startsWith("/") ||
     value.startsWith("//") ||
     /[\\\r\n]/.test(value)
-  )
+  ) {
     return "/";
+  }
   const url = new URL(value, "https://specbook.local");
   if (
     url.origin !== "https://specbook.local" ||
     ["/login", "/setup", "/join"].includes(url.pathname)
-  )
+  ) {
     return "/";
+  }
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
   const headers = new Headers(init?.headers);
-  if (init?.body && !headers.has("content-type"))
+  if (init?.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
-  if (method !== "GET" && method !== "HEAD")
+  }
+  if (method !== "GET" && method !== "HEAD") {
     headers.set("X-Specbook-Request", "1");
+  }
 
   let response: Response;
   try {
@@ -105,7 +109,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       headers,
     });
   } catch (error) {
-    if (isAbortError(error)) throw error;
+    if (isAbortError(error)) {
+      throw error;
+    }
     throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0, "network_error");
   }
   if (!response.ok) {
@@ -142,9 +148,12 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       code
     );
   }
-  if (method !== "GET" && method !== "HEAD")
+  if (method !== "GET" && method !== "HEAD") {
     invalidate({ resource: resourceForPath(path) });
-  if (response.status === 204) return undefined as T;
+  }
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return response.json() as Promise<T>;
 }
 

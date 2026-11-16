@@ -43,7 +43,9 @@ export function AuditSettings() {
     void load();
   }, [load]);
   async function more() {
-    if (!data?.nextBefore) return;
+    if (!data?.nextBefore) {
+      return;
+    }
     setBusy(true);
     setError("");
     try {

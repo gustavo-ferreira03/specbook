@@ -59,8 +59,9 @@ export function proposalDirectory(
     ![item.projectId, item.id, verificationId].every((value) =>
       /^[a-f0-9-]{36}$/.test(value)
     )
-  )
+  ) {
     throw new Error("Invalid proposal artifact id");
+  }
   return path.join(
     runsDir,
     "proposals",
@@ -75,24 +76,33 @@ export async function verifyProposal(
   item: InboxItem,
   signal?: AbortSignal
 ): Promise<ProposalVerification> {
-  if (item.jobId !== job.id || item.status !== "pending")
+  if (item.jobId !== job.id || item.status !== "pending") {
     throw new Error("Only this job's pending proposals can be verified");
+  }
   const patch = fixProposalSchema.parse(payloadOf(item).params);
   const before = payloadOf(item).before ?? {};
-  if (!patch.testSource || !before.yaml)
+  if (!patch.testSource || !before.yaml) {
     throw new Error("Proposal needs spec.ts and a behavior contract");
+  }
   const analysis = analyzeSpecSource(patch.testSource);
-  if (!analysis.ok) throw new CodedError("invalid_spec", analysis.error);
+  if (!analysis.ok) {
+    throw new CodedError("invalid_spec", analysis.error);
+  }
   const humanSpec = patch.humanSpec ?? parseSpecYaml(before.yaml).humanSpec;
   const stepsError = stepTitlesError(analysis.analysis.steps, humanSpec);
-  if (stepsError) throw new CodedError("invalid_spec", stepsError);
+  if (stepsError) {
+    throw new CodedError("invalid_spec", stepsError);
+  }
   const project = await projectsRepository.getProject(job.projectId);
-  if (!project) throw new Error("Project not found");
+  if (!project) {
+    throw new Error("Project not found");
+  }
   const environment = await jobEnvironment(job);
   const baseUrl = environment.baseUrl;
   const spec = await specsRepository.getSpec(patch.specId);
-  if (!spec || spec.projectId !== job.projectId)
+  if (!spec || spec.projectId !== job.projectId) {
     throw new Error("Spec no longer exists");
+  }
   const raw = await repoGit.withRepoLock(job.projectId, () =>
     readSpecRawFiles(spec)
   );
@@ -111,11 +121,12 @@ export async function verifyProposal(
         refs,
         environment.credentialOverrides
       );
-  if (missing.length)
+  if (missing.length) {
     throw new CodedError(
       "credentials",
       `Missing credentials: ${missing.join(", ")}. Ask the human to configure them in Settings > Credentials.`
     );
+  }
   const secretOrigins = remote
     ? { defaultOrigins: [], byRef: {} }
     : await resolveSecretOriginPolicy(job.projectId, refs, environment);
@@ -134,8 +145,9 @@ export async function verifyProposal(
       !current ||
       current.status !== "running" ||
       (await isAgentPaused(job.projectId))
-    )
+    ) {
       throw new Error("Job is no longer running");
+    }
     const remaining =
       current.limits.wallTimeMs -
       current.elapsedMs -
@@ -143,13 +155,15 @@ export async function verifyProposal(
         0,
         Date.now() - Date.parse(current.startedAt ?? new Date().toISOString())
       );
-    if (remaining < 1000)
+    if (remaining < 1000) {
       throw new Error("The investigation has not reached a confirmed result");
+    }
     return Math.min(120_000 * (environment.timeoutScale ?? 1), remaining);
   };
   const timeoutMs = await check();
-  if (environment.executor === "tunnel")
+  if (environment.executor === "tunnel") {
     await waitForTunnel(environment, job.projectId, [], signal);
+  }
   const outcome = remote
     ? await verifyRunnerCandidate({
         specId: spec.id,
@@ -217,8 +231,9 @@ export async function verifyProposal(
   };
   verification.review = await reviewRunEvidence(directory, verification);
   const current = await jobsRepository.item(item.id);
-  if (current?.status !== "pending")
+  if (current?.status !== "pending") {
     throw new Error("Proposal was reviewed during verification");
+  }
   await jobsRepository.updateItem(item.id, {
     payload: { ...current.payload, verification },
   });

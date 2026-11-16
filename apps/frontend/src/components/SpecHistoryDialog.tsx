@@ -42,7 +42,9 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     let active = true;
     setEntries(null);
     setSelected(null);
@@ -51,15 +53,21 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
     setEntriesLoading(true);
     getSpecHistory(specId)
       .then((result) => {
-        if (!active) return;
+        if (!active) {
+          return;
+        }
         setEntries(result.entries);
         setSelected(result.entries[0] ?? null);
       })
       .catch((caught: Error) => {
-        if (active) setError(caught.message);
+        if (active) {
+          setError(caught.message);
+        }
       })
       .finally(() => {
-        if (active) setEntriesLoading(false);
+        if (active) {
+          setEntriesLoading(false);
+        }
       });
     return () => {
       active = false;
@@ -67,20 +75,28 @@ export function SpecHistoryDialog({ specId }: { specId: string }) {
   }, [open, retryKey, specId]);
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selected) {
+      return;
+    }
     let active = true;
     setContents(null);
     setError("");
     setContentsLoading(true);
     getSpecAtCommit(specId, selected.sha)
       .then((result) => {
-        if (active) setContents(result);
+        if (active) {
+          setContents(result);
+        }
       })
       .catch((caught: Error) => {
-        if (active) setError(caught.message);
+        if (active) {
+          setError(caught.message);
+        }
       })
       .finally(() => {
-        if (active) setContentsLoading(false);
+        if (active) {
+          setContentsLoading(false);
+        }
       });
     return () => {
       active = false;

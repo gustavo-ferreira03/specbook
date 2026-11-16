@@ -191,12 +191,13 @@ describe("API request validation", () => {
       `${prefix} await response.dispose();`,
       `${prefix} await response.constructor.constructor("return process")();`,
     ];
-    for (const body of cases)
+    for (const body of cases) {
       assert.equal(
         analyzeSpecSource(spec(body, "request, step, secret")).ok,
         false,
         body
       );
+    }
     assert.equal(
       analyzeSpecSource(spec('await request.get("/api");', "page, step")).ok,
       false
@@ -780,7 +781,9 @@ describe("agent instructions", () => {
       };
       const body: string[] = [];
       for (const line of lines.slice(start + 1)) {
-        if (!line.startsWith("  ")) break;
+        if (!line.startsWith("  ")) {
+          break;
+        }
         body.push(line.slice(2));
       }
       assert.deepEqual(validateSpecSource(body.join("\n"), human), {

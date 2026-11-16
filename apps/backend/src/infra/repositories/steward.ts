@@ -21,7 +21,9 @@ export const stewardRepository = {
           .where(eq(projectStewards.projectId, projectId))
       )[0];
     const existing = await select();
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
     await db
       .insert(projectStewards)
       .values({ projectId, updatedAt: now() })
@@ -101,7 +103,9 @@ export const stewardRepository = {
           )
         )
     )[0]!;
-    if (row.sourceChatId) publishChatUpdate(row.sourceChatId);
+    if (row.sourceChatId) {
+      publishChatUpdate(row.sourceChatId);
+    }
     return row;
   },
   async intents(projectId: string) {
@@ -120,6 +124,8 @@ export const stewardRepository = {
       .set({ ...patch, updatedAt: now() })
       .where(eq(stewardIntents.id, id))
       .returning();
-    if (row?.sourceChatId) publishChatUpdate(row.sourceChatId);
+    if (row?.sourceChatId) {
+      publishChatUpdate(row.sourceChatId);
+    }
   },
 };

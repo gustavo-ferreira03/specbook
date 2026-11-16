@@ -7,7 +7,9 @@ export interface HostAllowlist {
 }
 
 function parseHost(value: string): URL | null {
-  if (!value || /[\s/@\\?#,]/.test(value)) return null;
+  if (!value || /[\s/@\\?#,]/.test(value)) {
+    return null;
+  }
   try {
     const url = new URL(`http://${value}`);
     return url.host ? url : null;
@@ -31,17 +33,25 @@ export function buildHostAllowlist(
     env.SPECBOOK_BACKEND_URL,
   ]) {
     try {
-      if (value) allowlist.exact.add(new URL(value).host.toLowerCase());
+      if (value) {
+        allowlist.exact.add(new URL(value).host.toLowerCase());
+      }
     } catch {}
   }
   for (const raw of (env.SPECBOOK_ALLOWED_HOSTS ?? "").split(",")) {
     const entry = raw.trim().toLowerCase();
-    if (entry === "*") allowlist.any = true;
-    else {
+    if (entry === "*") {
+      allowlist.any = true;
+    } else {
       const url = parseHost(entry);
-      if (!url) continue;
-      if (entry === url.hostname) allowlist.anyPort.add(url.hostname);
-      else allowlist.exact.add(url.host);
+      if (!url) {
+        continue;
+      }
+      if (entry === url.hostname) {
+        allowlist.anyPort.add(url.hostname);
+      } else {
+        allowlist.exact.add(url.host);
+      }
     }
   }
   return allowlist;
@@ -52,7 +62,9 @@ export function isAllowedHost(
   host: string | undefined
 ): boolean {
   const url = host ? parseHost(host) : null;
-  if (!url) return false;
+  if (!url) {
+    return false;
+  }
   return (
     allowlist.any ||
     isIP(url.hostname.replace(/^\[|\]$/g, "")) !== 0 ||
@@ -79,13 +91,16 @@ export function frontendProxyOrigin(
   headers: Headers,
   allowlist: HostAllowlist
 ): string | null {
-  if (headers.get("x-specbook-proxy") !== "1") return null;
+  if (headers.get("x-specbook-proxy") !== "1") {
+    return null;
+  }
   const host = headers.get("x-forwarded-host") ?? "";
   const protocol = headers.get("x-forwarded-proto");
   if (
     !isAllowedHost(allowlist, host) ||
     (protocol !== "http" && protocol !== "https")
-  )
+  ) {
     return null;
+  }
   return `${protocol}://${host}`;
 }

@@ -52,8 +52,9 @@ export async function settleStrict<T>(
           error instanceof Error ? error.message : String(error)
         ) ||
         Date.now() >= deadline
-      )
+      ) {
         throw error;
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
@@ -71,13 +72,15 @@ export function secretEnvName(profileName: string, fieldKey: string): string {
 }
 
 export function parseRuntime(raw: string | undefined): SpecbookRuntime {
-  if (!raw)
+  if (!raw) {
     throw new Error(
       `${RUNTIME_ENV} is not set; Specs only run through Specbook`
     );
+  }
   const value = JSON.parse(raw) as Partial<SpecbookRuntime>;
-  if (typeof value.baseURL !== "string")
+  if (typeof value.baseURL !== "string") {
     throw new Error(`${RUNTIME_ENV} has no baseURL`);
+  }
   new URL(value.baseURL);
   const policy = value.secretOrigins;
   return {
@@ -193,7 +196,9 @@ export function unwrap<T = unknown>(
   value: unknown,
   kinds: WrapperKind[] = ["page", "locator", "keyboard"]
 ): T | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
   const entry = originals.get(value);
   return entry && kinds.includes(entry.kind)
     ? (entry.original as T)
@@ -224,20 +229,29 @@ function isPlainValue(value: unknown): boolean {
 }
 
 function sanitize(value: unknown, depth = 0): unknown {
-  if (isPlainValue(value)) return value;
-  if (depth > 3) throw new Error("Argument is nested too deeply");
+  if (isPlainValue(value)) {
+    return value;
+  }
+  if (depth > 3) {
+    throw new Error("Argument is nested too deeply");
+  }
   const locator = unwrap(value, ["locator"]);
-  if (locator) return locator;
-  if (Array.isArray(value))
+  if (locator) {
+    return locator;
+  }
+  if (Array.isArray(value)) {
     return value.map((item) => sanitize(item, depth + 1));
+  }
   if (typeof value === "object" && value !== null && !isSecret(value)) {
     const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null)
+    if (proto !== Object.prototype && proto !== null) {
       throw new Error("Only plain object literals may be passed as options");
+    }
     const copy: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      if (key === "__proto__" || key === "constructor" || key === "prototype")
+      if (key === "__proto__" || key === "constructor" || key === "prototype") {
         throw new Error(`Option "${key}" is not allowed`);
+      }
       copy[key] = sanitize(item, depth + 1);
     }
     return copy;
@@ -252,10 +266,12 @@ function sanitizeAll(args: unknown[]): unknown[] {
 }
 
 function assertSelector(selector: unknown): void {
-  if (typeof selector !== "string")
+  if (typeof selector !== "string") {
     throw new Error("locator() takes a selector string");
-  if (selector.includes("internal:"))
+  }
+  if (selector.includes("internal:")) {
     throw new Error('Selectors may not use Playwright "internal:" engines');
+  }
 }
 
 export const SLOW_PAGE_NOTE =
@@ -308,13 +324,16 @@ export function createGuard(options: GuardOptions) {
     sensitive: boolean;
   } {
     const ref = secretRefs.get(token);
-    if (!ref) throw new Error("Not a Specbook secret");
+    if (!ref) {
+      throw new Error("Not a Specbook secret");
+    }
     const value = options.readSecret(ref.envName);
-    if (value === undefined)
+    if (value === undefined) {
       throw new CodedError(
         "credentials",
         `${ref.label} is not configured for this run`
       );
+    }
     return {
       value,
       envName: ref.envName,
@@ -329,8 +348,9 @@ export function createGuard(options: GuardOptions) {
     } catch {
       throw new CodedError("credential_origin", SECRET_ORIGIN_ERROR);
     }
-    if (!allowedOriginsFor(envName).includes(origin))
+    if (!allowedOriginsFor(envName).includes(origin)) {
       throw new CodedError("credential_origin", SECRET_ORIGIN_ERROR);
+    }
   }
 
   async function textArgument(
@@ -338,12 +358,17 @@ export function createGuard(options: GuardOptions) {
     value: unknown,
     target: RawLocator | null
   ): Promise<string> {
-    if (typeof value === "string") return value;
-    if (!isSecret(value))
+    if (typeof value === "string") {
+      return value;
+    }
+    if (!isSecret(value)) {
       throw new Error("Text must be a string literal or secret(...)");
+    }
     const { value: secret, envName, sensitive } = secretValue(value as object);
     assertPageOrigin(page, envName);
-    if (!sensitive) return secret;
+    if (!sensitive) {
+      return secret;
+    }
     if (target) {
       const handle = await target.elementHandle();
       try {
@@ -377,11 +402,12 @@ export function createGuard(options: GuardOptions) {
         }
         return active?.tagName === "IFRAME" || active?.tagName === "FRAME";
       });
-      if (intoFrame)
+      if (intoFrame) {
         throw new CodedError(
           "credential_origin",
           "Refusing to type a secret into an element outside the page's main frame."
         );
+      }
     }
     assertPageOrigin(page, envName);
     return secret;
@@ -391,7 +417,9 @@ export function createGuard(options: GuardOptions) {
     const methods: Record<string, unknown> = {};
     for (const name of LOCATOR_FACTORIES) {
       methods[name] = (...args: unknown[]) => {
-        if (name === "locator") assertSelector(args[0]);
+        if (name === "locator") {
+          assertSelector(args[0]);
+        }
         return wrapLocator(page, locator[name](...sanitizeAll(args)));
       };
     }
@@ -404,7 +432,9 @@ export function createGuard(options: GuardOptions) {
     for (const name of ["and", "or"] as const) {
       methods[name] = (other: unknown) => {
         const real = unwrap(other, ["locator"]);
-        if (!real) throw new Error(`${name}() takes a locator`);
+        if (!real) {
+          throw new Error(`${name}() takes a locator`);
+        }
         return wrapLocator(page, locator[name](real));
       };
     }
@@ -415,7 +445,9 @@ export function createGuard(options: GuardOptions) {
     }
     methods.dragTo = async (target: unknown, dragOptions?: unknown) => {
       const real = unwrap(target, ["locator"]);
-      if (!real) throw new Error("dragTo() takes a locator");
+      if (!real) {
+        throw new Error("dragTo() takes a locator");
+      }
       await settleStrict(() => locator.dragTo(real, sanitize(dragOptions)));
     };
     methods.fill = async (value: unknown, fillOptions?: unknown) => {
@@ -438,7 +470,9 @@ export function createGuard(options: GuardOptions) {
     const methods: Record<string, unknown> = {};
     for (const name of LOCATOR_FACTORIES) {
       methods[name] = (...args: unknown[]) => {
-        if (name === "locator") assertSelector(args[0]);
+        if (name === "locator") {
+          assertSelector(args[0]);
+        }
         return wrapLocator(page, page[name](...sanitizeAll(args)));
       };
     }
@@ -449,8 +483,9 @@ export function createGuard(options: GuardOptions) {
         );
       }
       const url = new URL(`${baseOrigin}${basePath}${target}`);
-      if (url.origin !== baseOrigin)
+      if (url.origin !== baseOrigin) {
         throw new Error("page.goto() must stay on the project origin.");
+      }
       await navigate(page, () => page.goto(url.href, sanitize(gotoOptions)));
     };
     for (const name of ["reload", "goBack", "goForward"] as const) {
@@ -459,24 +494,27 @@ export function createGuard(options: GuardOptions) {
       };
     }
     methods.waitForURL = async (url: unknown, waitOptions?: unknown) => {
-      if (typeof url !== "string" && !(url instanceof RegExp))
+      if (typeof url !== "string" && !(url instanceof RegExp)) {
         throw new Error("waitForURL() takes a string or a regular expression");
+      }
       await page.waitForURL(url, sanitize(waitOptions));
     };
     methods.waitForLoadState = async (
       state?: unknown,
       waitOptions?: unknown
     ) => {
-      if (state !== undefined && typeof state !== "string")
+      if (state !== undefined && typeof state !== "string") {
         throw new Error("waitForLoadState() takes a state name");
+      }
       await page.waitForLoadState(state, sanitize(waitOptions));
     };
     const keyboard = frozen(
       "keyboard",
       {
         press: async (key: unknown, pressOptions?: unknown) => {
-          if (typeof key !== "string")
+          if (typeof key !== "string") {
             throw new Error("keyboard.press() takes a key name");
+          }
           await page.keyboard.press(key, sanitize(pressOptions));
         },
         type: async (value: unknown, typeOptions?: unknown) => {
@@ -492,8 +530,9 @@ export function createGuard(options: GuardOptions) {
         !values.every(
           (value) => typeof value === "number" && Number.isFinite(value)
         )
-      )
+      ) {
         throw new Error(`mouse.${method}() takes literal numbers`);
+      }
     };
     methods.mouse = frozen(
       "mouse",
@@ -562,8 +601,9 @@ export function createGuard(options: GuardOptions) {
       );
     const safeUrl = (url: URL) => {
       const safe = new URL(url);
-      for (const key of safe.searchParams.keys())
+      for (const key of safe.searchParams.keys()) {
         if (sensitive.test(key)) safe.searchParams.set(key, "••••");
+      }
       return redact(safe.href).slice(0, 2000);
     };
     const checkOrigin = (url: URL, refs: Set<string>) => {
@@ -572,21 +612,25 @@ export function createGuard(options: GuardOptions) {
         url.username ||
         url.password ||
         !apiOrigins.includes(url.origin)
-      )
+      ) {
         throw new Error("API request origin is not allowed for this run.");
-      for (const ref of refs)
+      }
+      for (const ref of refs) {
         if (!allowedOriginsFor(ref).includes(url.origin))
           throw new CodedError(
             "credential_origin",
             "Refusing to send a secret: the API origin is not allowed for this credential."
           );
+      }
     };
     const resolveValue = (
       value: unknown,
       refs: Set<string>,
       depth = 0
     ): unknown => {
-      if (depth > 6) throw new Error("API values are nested too deeply");
+      if (depth > 6) {
+        throw new Error("API values are nested too deeply");
+      }
       if (isSecret(value)) {
         const secret = secretValue(value as object);
         refs.add(secret.envName);
@@ -595,22 +639,26 @@ export function createGuard(options: GuardOptions) {
       if (
         value === null ||
         ["string", "number", "boolean"].includes(typeof value)
-      )
+      ) {
         return value;
-      if (Array.isArray(value))
+      }
+      if (Array.isArray(value)) {
         return value.map((item) => resolveValue(item, refs, depth + 1));
+      }
       if (
         typeof value !== "object" ||
         value === null ||
         ![Object.prototype, null].includes(Object.getPrototypeOf(value))
-      )
+      ) {
         throw new Error(
           "API bodies must be literal JSON values or secret(...)"
         );
+      }
       const copy: Record<string, unknown> = {};
       for (const [key, item] of Object.entries(value)) {
-        if (["__proto__", "constructor", "prototype"].includes(key))
+        if (["__proto__", "constructor", "prototype"].includes(key)) {
           throw new Error(`API key "${key}" is not allowed`);
+        }
         copy[key] = resolveValue(item, refs, depth + 1);
       }
       return copy;
@@ -621,8 +669,9 @@ export function createGuard(options: GuardOptions) {
         target: unknown,
         input: unknown = {}
       ) => {
-        if (typeof target !== "string" || /[\\\u0000-\u001f]/.test(target))
+        if (typeof target !== "string" || /[\\\u0000-\u001f]/.test(target)) {
           throw new Error("API requests need a literal path or HTTP(S) URL");
+        }
         let url = isSafeRelativePath(target)
           ? new URL(`${baseOrigin}${basePath}${target}`)
           : new URL(target);
@@ -635,38 +684,43 @@ export function createGuard(options: GuardOptions) {
           !requestOptions ||
           Array.isArray(requestOptions) ||
           typeof requestOptions !== "object"
-        )
+        ) {
           throw new Error("API options must be a literal object");
-        for (const key of Object.keys(requestOptions))
+        }
+        for (const key of Object.keys(requestOptions)) {
           if (!["headers", "data", "timeout"].includes(key))
             throw new Error(`API option "${key}" is not allowed`);
+        }
         const headers = requestOptions.headers ?? {};
         if (
           !headers ||
           typeof headers !== "object" ||
           Array.isArray(headers) ||
           Object.values(headers).some((value) => typeof value !== "string")
-        )
+        ) {
           throw new Error("API headers must contain string values");
+        }
         if (
           Object.keys(headers).some((name) =>
             API_ROUTING_HEADERS.has(name.toLowerCase())
           )
-        )
+        ) {
           throw new CodedError(
             "environment",
             "API routing headers are controlled by the run's origin policy"
           );
+        }
         const timeout = requestOptions.timeout ?? 15_000;
         if (
           typeof timeout !== "number" ||
           !Number.isFinite(timeout) ||
           timeout < 1 ||
           timeout > 30_000
-        )
+        ) {
           throw new Error(
             "API timeout must be between 1 and 30000 milliseconds"
           );
+        }
         let currentMethod = method;
         let data = requestOptions.data;
         checkOrigin(url, refs);
@@ -711,8 +765,9 @@ export function createGuard(options: GuardOptions) {
             location
           ) {
             await response.dispose();
-            if (redirects === 5)
+            if (redirects === 5) {
               throw new Error("API request exceeded five redirects");
+            }
             url = new URL(location, url);
             if (
               evidence.status === 303 ||

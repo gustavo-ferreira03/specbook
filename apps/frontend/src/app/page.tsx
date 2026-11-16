@@ -46,7 +46,9 @@ function HomeContent() {
     let active = true;
     getLlmRuntimeStatus()
       .then((status) => {
-        if (active) setLlmReady(status.ready);
+        if (active) {
+          setLlmReady(status.ready);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -60,7 +62,9 @@ function HomeContent() {
     setLoadError("");
     api<{ projects: Project[] }>("/projects")
       .then((result) => {
-        if (!active) return;
+        if (!active) {
+          return;
+        }
         setLastProjectId(localStorage.getItem("specbook:last-project"));
         if (result.projects.length > 0 && (!forceNew || !canEdit)) {
           const lastProject = localStorage.getItem("specbook:last-project");
@@ -73,7 +77,9 @@ function HomeContent() {
         setProjects(result.projects);
       })
       .catch((error) => {
-        if (!active) return;
+        if (!active) {
+          return;
+        }
         setLoadError(error instanceof Error ? error.message : String(error));
         setProjects([]);
       });
@@ -160,7 +166,7 @@ function HomeContent() {
     );
   }
 
-  if (!canEdit)
+  if (!canEdit) {
     return (
       <main className="bg-surface min-h-dvh">
         <InstanceHeader />
@@ -170,6 +176,7 @@ function HomeContent() {
         />
       </main>
     );
+  }
   const returnProject =
     projects.find((project) => project.id === lastProjectId) ?? projects[0];
   const steps = [

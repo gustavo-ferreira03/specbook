@@ -49,20 +49,24 @@ function SettingsContent() {
 
   function selectTab(value: string) {
     const params = new URLSearchParams(searchParams.toString());
-    if (value === "general") params.delete("tab");
-    else params.set("tab", value);
+    if (value === "general") {
+      params.delete("tab");
+    } else {
+      params.set("tab", value);
+    }
     router.replace(params.size ? `${pathname}?${params}` : pathname, {
       scroll: false,
     });
   }
 
-  if (!canEdit)
+  if (!canEdit) {
     return (
       <EmptyState
         title="Project settings are read-only"
         description="Your viewer account can read Specs, run results and evidence. Ask an editor to change project settings."
       />
     );
+  }
   return (
     <div className="bg-surface flex min-h-full flex-col">
       <PageHeader

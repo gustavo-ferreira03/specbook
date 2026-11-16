@@ -41,15 +41,18 @@ const createSpecSchema = z.object({
 });
 
 function mapManualError(error: unknown): never {
-  if (error instanceof HTTPException) throw error;
+  if (error instanceof HTTPException) {
+    throw error;
+  }
   if (
     error instanceof ResourceBusyError ||
     error instanceof UnsafeRepoPathError
   ) {
     throw new HTTPException(409, { message: error.message });
   }
-  if (error instanceof YamlParseError)
+  if (error instanceof YamlParseError) {
     throw new HTTPException(400, { message: error.message });
+  }
   if (
     error instanceof Error &&
     /unfinished rebase|uncommitted changes/.test(error.message)
@@ -84,20 +87,23 @@ export function createProjectsRouter(): Hono {
 
   router.get("/projects/:id", access("viewer"), async (c) => {
     const project = await projectsRepository.getProject(c.req.param("id"));
-    if (!project)
+    if (!project) {
       throw new HTTPException(404, { message: "Project not found" });
+    }
     return c.json({ project: publicProject(project) });
   });
 
   router.get("/projects/:id/favicon", access("viewer"), async (c) => {
     const project = await projectsRepository.getProject(c.req.param("id"));
-    if (!project)
+    if (!project) {
       throw new HTTPException(404, { message: "Project not found" });
+    }
     const icon = await projectFavicon(project.id, project.baseUrl).catch(
       () => null
     );
-    if (!icon)
+    if (!icon) {
       return c.body(null, 404, { "Cache-Control": "private, max-age=3600" });
+    }
     return c.body(new Uint8Array(icon.body), 200, {
       "Content-Type": icon.contentType,
       "Cache-Control": "private, max-age=86400",
@@ -113,8 +119,9 @@ export function createProjectsRouter(): Hono {
     async (c) =>
       withProjectEnvironmentLock(c.req.param("id"), async () => {
         const project = await projectsRepository.getProject(c.req.param("id"));
-        if (!project)
+        if (!project) {
           throw new HTTPException(404, { message: "Project not found" });
+        }
         const input = c.req.valid("json");
         const environment = (
           await environmentsRepository.list(project.id)
@@ -136,8 +143,9 @@ export function createProjectsRouter(): Hono {
         }
         await projectsRepository.updateProject(project.id, c.req.valid("json"));
         const updated = await projectsRepository.getProject(project.id);
-        if (!updated)
+        if (!updated) {
           throw new HTTPException(404, { message: "Project not found" });
+        }
         return c.json({ project: publicProject(updated) });
       })
   );
@@ -156,8 +164,9 @@ export function createProjectsRouter(): Hono {
   router.get("/projects/:id/tree", access("viewer"), async (c) => {
     const projectId = c.req.param("id");
     const project = await projectsRepository.getProject(projectId);
-    if (!project)
+    if (!project) {
       throw new HTTPException(404, { message: "Project not found" });
+    }
     const syncError = project.gitExternalSyncError;
     const [features, specs] = await Promise.all([
       featuresRepository.listFeatures(projectId),
@@ -185,8 +194,9 @@ export function createProjectsRouter(): Hono {
     zValidator("json", createSpecSchema),
     async (c) => {
       const project = await projectsRepository.getProject(c.req.param("id"));
-      if (!project)
+      if (!project) {
         throw new HTTPException(404, { message: "Project not found" });
+      }
       const { featureId, title } = c.req.valid("json");
       const feature = await featuresRepository.getFeature(featureId);
       if (!feature || feature.projectId !== project.id) {

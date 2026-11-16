@@ -26,7 +26,9 @@ async function entries(directory: string) {
   return fs
     .readdir(directory, { withFileTypes: true })
     .catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return [];
+      if (error.code === "ENOENT") {
+        return [];
+      }
       throw error;
     });
 }
@@ -47,15 +49,18 @@ async function protectedRuns(): Promise<Set<string>> {
     for (const job of await db
       .select()
       .from(jobs)
-      .where(inArray(jobs.id, [...decisionJobs])))
+      .where(inArray(jobs.id, [...decisionJobs]))) {
       if (job.runId) ids.add(job.runId);
+    }
   }
   for (const item of decisions) {
     const references =
       JSON.stringify(item.payload).match(
         /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
       ) ?? [];
-    for (const id of references) ids.add(id);
+    for (const id of references) {
+      ids.add(id);
+    }
   }
   return ids;
 }
@@ -67,8 +72,9 @@ async function removeVideos(
   let removed = 0;
   for (const entry of await entries(directory)) {
     const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) removed += await removeVideos(file, cutoff);
-    else if (
+    if (entry.isDirectory()) {
+      removed += await removeVideos(file, cutoff);
+    } else if (
       entry.isFile() &&
       entry.name.endsWith(".webm") &&
       (await fs.stat(file)).mtimeMs < cutoff
@@ -90,11 +96,12 @@ async function removeVideos(
           (stat) => stat.isFile(),
           () => false
         ));
-      if (!exists)
+      if (!exists) {
         await writeProtectedFile(
           manifestPath,
           JSON.stringify({ ...manifest, video: null })
         );
+      }
     }
   }
   return removed;
@@ -105,12 +112,16 @@ async function pruneMetrics(file: string, cutoff: number): Promise<number> {
     const text = await fs
       .readFile(file, "utf8")
       .catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return "";
+        if (error.code === "ENOENT") {
+          return "";
+        }
         throw error;
       });
     let removed = 0;
     const kept = text.split("\n").filter((line) => {
-      if (!line) return false;
+      if (!line) {
+        return false;
+      }
       try {
         const row = JSON.parse(line) as { at?: string; startedAt?: string };
         if (Date.parse(row.at ?? row.startedAt ?? "") < cutoff) {
@@ -120,8 +131,9 @@ async function pruneMetrics(file: string, cutoff: number): Promise<number> {
       } catch {}
       return true;
     });
-    if (removed)
+    if (removed) {
       await writeProtectedFile(file, kept.length ? `${kept.join("\n")}\n` : "");
+    }
     return removed;
   });
 }
@@ -146,7 +158,9 @@ async function clean(
   for (const entry of await entries(runBatchesDir)) {
     if (entry.isDirectory() && uuid.test(entry.name)) {
       const batch = await getRunBatch(entry.name);
-      if (batch) batches.push(batch);
+      if (batch) {
+        batches.push(batch);
+      }
     }
   }
   const protectedIds = await protectedRuns();
@@ -161,19 +175,21 @@ async function clean(
       run.status === "running" ||
       run.automationPending ||
       protectedIds.has(run.id)
-    )
+    ) {
       kept.add(run.id);
+    }
   }
   let changed = true;
   while (changed) {
     changed = false;
-    for (const run of rows)
+    for (const run of rows) {
       if (run.retryOf && (kept.has(run.id) || kept.has(run.retryOf))) {
         if (!kept.has(run.id) || !kept.has(run.retryOf)) changed = true;
         kept.add(run.id);
         kept.add(run.retryOf);
       }
-    for (const batch of batches)
+    }
+    for (const batch of batches) {
       if (
         batch.status === "running" ||
         Date.parse(batch.startedAt) >= now - settings.batchDays * DAY_MS ||
@@ -185,17 +201,21 @@ async function clean(
             changed = true;
           }
       }
+    }
   }
   for (const run of rows) {
-    if (areSpecsLocked([run.specId])) continue;
+    if (areSpecsLocked([run.specId])) {
+      continue;
+    }
     await withSpecLock(run.specId, async () => {
       const currentProtection = await protectedRuns();
       if (
         currentProtection.has(run.id) ||
         run.status === "running" ||
         run.automationPending
-      )
+      ) {
         return;
+      }
       const directory = path.join(runsDir, run.id);
       if (!kept.has(run.id)) {
         await db
@@ -203,11 +223,12 @@ async function clean(
           .where(and(eq(runs.id, run.id), eq(runs.status, run.status)));
         await fs.rm(directory, { recursive: true, force: true });
         result.removedRuns++;
-      } else
+      } else {
         result.removedVideos += await removeVideos(
           directory,
           now - settings.videoDays * DAY_MS
         );
+      }
     });
   }
   const remaining = new Set(
@@ -217,8 +238,9 @@ async function clean(
     if (
       batch.status === "running" ||
       batch.specs.some((spec) => areSpecsLocked([spec.specId]))
-    )
+    ) {
       continue;
+    }
     const directory = path.join(runBatchesDir, batch.id);
     if (
       Date.parse(batch.startedAt) < now - settings.batchDays * DAY_MS &&
@@ -226,17 +248,19 @@ async function clean(
     ) {
       await fs.rm(directory, { recursive: true, force: true });
       result.removedBatches++;
-    } else if (batch.specs.every((spec) => !protectedIds.has(spec.runId)))
+    } else if (batch.specs.every((spec) => !protectedIds.has(spec.runId))) {
       result.removedVideos += await removeVideos(
         directory,
         now - settings.videoDays * DAY_MS
       );
+    }
   }
-  for (const name of ["chat-turns.jsonl", "agent-events.jsonl"])
+  for (const name of ["chat-turns.jsonl", "agent-events.jsonl"]) {
     result.removedMetrics += await pruneMetrics(
       path.join(storageRoot, "metrics", name),
       now - settings.metricDays * DAY_MS
     );
+  }
   for (const entry of await entries(
     path.join(storageRoot, "chat", "browser")
   )) {
@@ -247,8 +271,9 @@ async function clean(
         entry.name,
         now - settings.browserProfileDays * DAY_MS
       ))
-    )
+    ) {
       result.removedBrowserProfiles++;
+    }
   }
   await settingsRepository.recordRetentionCleanup(result);
   return result;
@@ -264,7 +289,9 @@ export function cleanupRetention(now = Date.now()): Promise<RetentionCleanup> {
 }
 
 export function startRetentionMonitor(): void {
-  if (process.env.SPECBOOK_RETENTION_ENABLED === "false" || timer) return;
+  if (process.env.SPECBOOK_RETENTION_ENABLED === "false" || timer) {
+    return;
+  }
   timer = setInterval(
     () =>
       void cleanupRetention().catch((error) =>

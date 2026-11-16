@@ -76,7 +76,9 @@ const wrap = (text: string, size: number) =>
         if (current && width(current) + 1 + width(word) > size) {
           out.push(current);
           current = word;
-        } else current = current ? `${current} ${word}` : word;
+        } else {
+          current = current ? `${current} ${word}` : word;
+        }
       }
       return [...out, current].join("\n");
     })
@@ -108,9 +110,15 @@ const ago = (iso: string) => {
     0,
     Math.round((Date.now() - Date.parse(iso)) / 1000)
   );
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 60) {
+    return "just now";
+  }
+  if (seconds < 3600) {
+    return `${Math.floor(seconds / 60)}m ago`;
+  }
+  if (seconds < 86_400) {
+    return `${Math.floor(seconds / 3600)}h ago`;
+  }
   return `${Math.floor(seconds / 86_400)}d ago`;
 };
 const fields = (rows: [string, string | undefined][]) => {
@@ -141,7 +149,9 @@ const table = (rows: string[][]) => {
 };
 // The full Playwright call log stays in the report; the terminal shows the assertion.
 const briefReason = (reason: string | null | undefined) => {
-  if (!reason) return "Failed without a reason";
+  if (!reason) {
+    return "Failed without a reason";
+  }
   const lines = reason
     .split("\nCall log:")[0]!
     .trim()
@@ -259,14 +269,17 @@ export function renderCheck(result: {
     locators: LocatorCheck[];
   }[];
 }) {
-  if (!result.specs.length)
+  if (!result.specs.length) {
     return failure(
       "No Specs found. Create one with specbook spec new or specbook chat."
     );
+  }
   const valid = result.specs.filter((spec) => spec.ok).length;
   const lines = result.specs.map((spec) => {
     const head = `  ${spec.ok ? pc.green("✔") : pc.red("✖")} ${spec.path}`;
-    if (spec.error) return `${head}\n${indent(pc.red(spec.error), 6)}`;
+    if (spec.error) {
+      return `${head}\n${indent(pc.red(spec.error), 6)}`;
+    }
     const problems = spec.locators.filter(
       (locator) => locator.status !== "matched"
     );
@@ -295,8 +308,9 @@ export function renderRun(run: LocalRun) {
     (result) => result.status === "passed"
   ).length;
   const groups = new Map<string, LocalRun["results"]>();
-  for (const result of run.results)
+  for (const result of run.results) {
     groups.set(result.feature, [...(groups.get(result.feature) ?? []), result]);
+  }
   const titleSize = Math.min(
     64,
     Math.max(...run.results.map((result) => result.title.length))
@@ -306,7 +320,9 @@ export function renderRun(run: LocalRun) {
       `  ${pc.bold(feature)}`,
       ...results.map((result) => {
         const line = `    ${icon(result.status)} ${pad(result.title, titleSize)}  ${pc.dim(duration(result.durationMs))}`;
-        if (result.status === "passed") return line;
+        if (result.status === "passed") {
+          return line;
+        }
         const step = result.failedStep
           ? `${pc.dim("at step")} ${result.failedStep}\n`
           : "";
@@ -342,8 +358,9 @@ export function renderProfiles(
     origins: string[];
   }[]
 ) {
-  if (!profiles.length)
+  if (!profiles.length) {
     return `${pc.dim("No credential profiles yet.")}\n${next("specbook credentials add <profile>")}`;
+  }
   return [
     pc.bold(`Credential profiles ${pc.dim(`(${profiles.length})`)}`),
     "",
@@ -402,7 +419,9 @@ export function renderBrowse(
   action: string | undefined,
   result: Record<string, unknown>
 ) {
-  if (result.closed) return success("Closed the exploration browser");
+  if (result.closed) {
+    return success("Closed the exploration browser");
+  }
   if (typeof result.snapshot === "string") {
     const tree =
       result.snapshot.match(/```yaml\n([\s\S]*?)\n```/)?.[1] ?? result.snapshot;
@@ -472,12 +491,15 @@ export function renderReply(reply: ChatReply) {
       )
     );
   }
-  if (reply.specs?.length)
+  if (reply.specs?.length) {
     out.push("", pc.bold("  Specs"), ...reply.specs.map(chatSpec));
-  if (reply.status === "working")
+  }
+  if (reply.status === "working") {
     out.push(next(`specbook chat ${reply.id} --wait`));
-  if (reply.status === "waiting_for_reply")
+  }
+  if (reply.status === "waiting_for_reply") {
     out.push(next(`specbook chat ${reply.id} "<your answer>"`));
+  }
   if (reply.status === "waiting_for_selection") {
     const all =
       reply.proposals?.map((proposal) => proposal.number).join(",") ?? "1";
@@ -507,10 +529,13 @@ export function renderConversations(result: {
     specs: ChatSpec[];
   }[];
 }) {
-  if (!result.conversations.length)
+  if (!result.conversations.length) {
     return `${pc.dim("No conversations yet.")}\n${next(`specbook chat "describe a behavior to cover"`)}`;
+  }
   const specs = (list: ChatSpec[]) => {
-    if (!list.length) return pc.dim("none");
+    if (!list.length) {
+      return pc.dim("none");
+    }
     const passed = list.filter((spec) => spec.status === "passed").length;
     return passed === list.length
       ? pc.green(`${passed} passed`)

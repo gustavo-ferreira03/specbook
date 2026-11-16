@@ -67,12 +67,18 @@ export interface CiOptions {
 }
 const flag = (name: string) => {
   const value = process.env[name];
-  if (value === undefined || value === "false" || value === "0") return false;
-  if (value === "true" || value === "1") return true;
+  if (value === undefined || value === "false" || value === "0") {
+    return false;
+  }
+  if (value === "true" || value === "1") {
+    return true;
+  }
   throw new Error(`${name} must be true or false`);
 };
 const required = (value: string | undefined, name: string) => {
-  if (!value) throw new Error(`${name} is required`);
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
   return value;
 };
 
@@ -89,13 +95,15 @@ export async function runCi(options: CiOptions) {
     options.project ?? process.env.SPECBOOK_PROJECT,
     "SPECBOOK_PROJECT or --project"
   );
-  if (!z.string().uuid().safeParse(project).success)
+  if (!z.string().uuid().safeParse(project).success) {
     throw new Error("Use the project id for SPECBOOK_PROJECT or --project");
+  }
   const timeoutMs =
     Number(options.timeout ?? process.env.SPECBOOK_TIMEOUT_SECONDS ?? 3600) *
     1000;
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error("Use a positive timeout in seconds");
+  }
   const deadline = Date.now() + timeoutMs;
   const context = await ciCommentContext(
     options.comment ?? process.env.SPECBOOK_COMMENT_PROVIDER ?? "none"
@@ -105,17 +113,23 @@ export async function runCi(options: CiOptions) {
     .map((id) => id.trim())
     .filter(Boolean);
   const featureId = options.featureId ?? process.env.SPECBOOK_FEATURE_ID;
-  if (featureId && specIds?.length)
+  if (featureId && specIds?.length) {
     throw new Error("Select a feature or Specs, not both");
+  }
   if (
     (featureId && !z.string().uuid().safeParse(featureId).success) ||
     specIds?.some((id) => !z.string().uuid().safeParse(id).success)
-  )
+  ) {
     throw new Error("Use remote ids for --feature-id and --spec-ids");
+  }
   const baseUrl = options.baseUrl ?? process.env.SPECBOOK_BASE_URL;
   const buildUrl = options.buildUrl ?? process.env.SPECBOOK_BUILD_URL;
-  if (baseUrl) normalizeServerUrl(baseUrl);
-  if (buildUrl) normalizeServerUrl(buildUrl);
+  if (baseUrl) {
+    normalizeServerUrl(baseUrl);
+  }
+  if (buildUrl) {
+    normalizeServerUrl(buildUrl);
+  }
   const input = {
     environment: options.environment ?? process.env.SPECBOOK_ENVIRONMENT,
     ...(featureId ? { featureId } : {}),
@@ -132,8 +146,9 @@ export async function runCi(options: CiOptions) {
   };
   const get = async (route: string, method = "GET", body?: unknown) => {
     for (let attempt = 0; ; attempt++) {
-      if (Date.now() >= deadline)
+      if (Date.now() >= deadline) {
         throw new Error("Timed out waiting for Specbook results");
+      }
       try {
         return await request({ url: api, token }, route, {
           method,
@@ -147,8 +162,9 @@ export async function runCi(options: CiOptions) {
           (error instanceof RemoteError && error.status < 500) ||
           attempt >= 4 ||
           Date.now() >= deadline
-        )
+        ) {
           throw error;
+        }
         await new Promise((resolve) =>
           setTimeout(
             resolve,
@@ -166,11 +182,12 @@ export async function runCi(options: CiOptions) {
   api = started.url.slice(0, -route.length);
   let result = await responseJson(started, ciResultSchema);
   const resultRoute = `/ci/runs/${encodeURIComponent(result.batch.id)}`;
-  while (!result.complete)
+  while (!result.complete) {
     result = await responseJson(
       await get(`${resultRoute}?wait=true`),
       ciResultSchema
     );
+  }
   const files = {
     report: path.resolve(
       options.report ??
@@ -186,8 +203,9 @@ export async function runCi(options: CiOptions) {
         "specbook-summary.md"
     ),
   };
-  if (new Set(Object.values(files)).size !== 3)
+  if (new Set(Object.values(files)).size !== 3) {
     throw new Error("Report, JUnit and summary paths must be different");
+  }
   let summaryText = "";
   for (const [format, file] of [
     ["html", files.report],
@@ -201,7 +219,9 @@ export async function runCi(options: CiOptions) {
     );
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, text, "utf8");
-    if (format === "markdown") summaryText = text;
+    if (format === "markdown") {
+      summaryText = text;
+    }
   }
   await publishCiComment(context, api, project, summaryText);
   return {

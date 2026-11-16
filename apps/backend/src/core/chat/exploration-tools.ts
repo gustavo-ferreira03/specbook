@@ -32,8 +32,9 @@ function resultText(result: Record<string, unknown>): string {
 
 function evaluationResult(result: Record<string, unknown>): unknown {
   const text = resultText(result);
-  if (result.isError || text.startsWith("### Error"))
+  if (result.isError || text.startsWith("### Error")) {
     throw new Error(text.slice(0, 1000));
+  }
   const section =
     text.match(/(?:^|\n)### Result\n([\s\S]*?)(?=\n### |$)/)?.[1] ?? text;
   try {
@@ -48,23 +49,26 @@ export async function scanPage(
   signal?: AbortSignal
 ): Promise<string> {
   signal?.throwIfAborted();
-  if (!options.mcp)
+  if (!options.mcp) {
     throw new Error(
       "The agent browser is unavailable. Ask for help through the Inbox if it cannot be started."
     );
+  }
   const mcp = options.mcp;
   const start = new URL(options.baseUrl);
-  if (!["http:", "https:"].includes(start.protocol))
+  if (!["http:", "https:"].includes(start.protocol)) {
     throw new Error("Page scans require an HTTP or HTTPS project URL");
+  }
   const origin = start.origin;
   const checkOrigin = async () => {
     signal?.throwIfAborted();
     const active = await getActiveTabUrl(mcp, signal);
     signal?.throwIfAborted();
-    if (!active || new URL(active).origin !== origin)
+    if (!active || new URL(active).origin !== origin) {
       throw new Error(
         `Navigate within the project origin ${origin} before scanning.`
       );
+    }
   };
   await mcp.ensureBrowser(signal);
   await checkOrigin();
@@ -139,8 +143,9 @@ export async function scanPage(
       result.status === "rejected" &&
       result.reason instanceof Error &&
       result.reason.name === "AbortError"
-    )
+    ) {
       throw result.reason;
+    }
   }
   await checkOrigin();
   const consoleErrors =
@@ -202,15 +207,18 @@ export function createExplorationTools(options: ExplorationToolOptions) {
       ),
       async execute(_id, input, signal) {
         const { target } = inspectElementSchema.parse(input);
-        if (!options.mcp) throw new Error("The agent browser is unavailable.");
+        if (!options.mcp) {
+          throw new Error("The agent browser is unavailable.");
+        }
         const active = await getActiveTabUrl(options.mcp, signal);
         if (
           !active ||
           new URL(active).origin !== new URL(options.baseUrl).origin
-        )
+        ) {
           throw new Error(
             "Navigate within the project origin before inspecting elements."
           );
+        }
         const result = await options.mcp.client.callTool(
           {
             name: "browser_evaluate",
@@ -261,8 +269,9 @@ export function createExplorationTools(options: ExplorationToolOptions) {
           };
         } catch (error) {
           signal?.throwIfAborted();
-          if (error instanceof Error && error.name === "AbortError")
+          if (error instanceof Error && error.name === "AbortError") {
             throw error;
+          }
           const message = await options.scrub(
             String(
               redactUrls(error instanceof Error ? error.message : String(error))

@@ -251,8 +251,9 @@ function AreaSpecs({
     area.specs.length > 0 &&
     area.uncoveredRoutes.length > 0 &&
     area.uncoveredRoutes.length < area.routes.length;
-  if (area.specs.length === 0)
+  if (area.specs.length === 0) {
     return <p className="text-meta text-ink-subtle mt-2">No Specs yet.</p>;
+  }
   return (
     <Collapsible className="mt-1.5">
       <CollapsibleTrigger asChild>
@@ -399,7 +400,9 @@ function ContextPanel({
     let active = true;
     getLlmRuntimeStatus()
       .then((status) => {
-        if (active) setLlmReady(status.ready);
+        if (active) {
+          setLlmReady(status.ready);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -415,7 +418,7 @@ function ContextPanel({
     ? `/p/${projectId}/chats/${draft.sourceChatId}`
     : null;
 
-  if (!canEdit && !draft && !confirmed)
+  if (!canEdit && !draft && !confirmed) {
     return (
       <section>
         <SectionHeader title="What this app does" />
@@ -425,9 +428,12 @@ function ContextPanel({
         </p>
       </section>
     );
+  }
 
   if (!draft && !confirmed) {
-    if (runnerEnvironment) return <RunnerExplorationNotice />;
+    if (runnerEnvironment) {
+      return <RunnerExplorationNotice />;
+    }
     return (
       <section
         aria-labelledby="overview-context-heading"
@@ -734,15 +740,21 @@ export function AppContext({ projectId }: { projectId: string }) {
     setNotFound(false);
     Promise.all([getProject(projectId), getProjectContext(projectId)])
       .then(([projectResult, contextResult]) => {
-        if (!active) return;
+        if (!active) {
+          return;
+        }
         setProject(projectResult.project);
         setContextState(contextResult);
       })
       .catch((error) => {
-        if (!active) return;
-        if (error instanceof ApiError && error.status === 404)
+        if (!active) {
+          return;
+        }
+        if (error instanceof ApiError && error.status === 404) {
           setNotFound(true);
-        else setLoadError(errorMessage(error));
+        } else {
+          setLoadError(errorMessage(error));
+        }
       });
     return () => {
       active = false;
@@ -765,7 +777,9 @@ export function AppContext({ projectId }: { projectId: string }) {
             .then((result) => setProject(result.project))
             .catch(() => undefined);
         }
-        if (matchesInvalidation(event, "tree", projectId)) loadCoverage();
+        if (matchesInvalidation(event, "tree", projectId)) {
+          loadCoverage();
+        }
       }),
     [projectId, loadCoverage]
   );
@@ -812,7 +826,9 @@ export function AppContext({ projectId }: { projectId: string }) {
     );
   }
 
-  if (!project || !contextState) return <ContextSkeleton />;
+  if (!project || !contextState) {
+    return <ContextSkeleton />;
+  }
 
   return (
     <ContextPanel

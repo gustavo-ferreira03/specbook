@@ -76,19 +76,23 @@ export async function proposeMutation(
     if (name === "update_spec") {
       const patch = fixProposalSchema.parse(input);
       const spec = await specsRepository.getSpec(patch.specId);
-      if (!spec || spec.projectId !== job.projectId)
+      if (!spec || spec.projectId !== job.projectId) {
         throw new Error("Spec not found in this project");
+      }
       const raw = await readSpecRawFiles(spec);
-      if (!raw.yaml)
+      if (!raw.yaml) {
         throw new Error(
           "Spec has no behavior contract. Ask the human to repair spec.yml."
         );
+      }
       const humanSpec = patch.humanSpec ?? parseSpecYaml(raw.yaml).humanSpec;
       const validation = validateSpec(
         patch.testSource ?? raw.testSource ?? "",
         humanSpec
       );
-      if (!validation.ok) throw new Error(validation.error);
+      if (!validation.ok) {
+        throw new Error(validation.error);
+      }
       kind = "spec_fix";
       title = `Proposed fix: ${spec.title}`;
       params = patch;
@@ -96,10 +100,13 @@ export async function proposeMutation(
     } else if (name === "create_spec") {
       const proposed = newSpecProposalSchema.parse(input);
       const feature = await featuresRepository.getFeature(proposed.featureId);
-      if (!feature || feature.projectId !== job.projectId)
+      if (!feature || feature.projectId !== job.projectId) {
         throw new Error("Feature not found in this project");
+      }
       const validation = validateSpec(proposed.testSource, proposed.humanSpec);
-      if (!validation.ok) throw new Error(validation.error);
+      if (!validation.ok) {
+        throw new Error(validation.error);
+      }
       kind = "new_spec";
       title = `Proposed Spec: ${proposed.title}`;
       params = proposed;
@@ -107,8 +114,9 @@ export async function proposeMutation(
       const proposed = featureProposalSchema.parse(input);
       if (proposed.parentId) {
         const parent = await featuresRepository.getFeature(proposed.parentId);
-        if (!parent || parent.projectId !== job.projectId)
+        if (!parent || parent.projectId !== job.projectId) {
           throw new Error("Parent feature not found in this project");
+        }
       }
       kind = "feature";
       title = `Proposed Feature: ${proposed.title}`;
@@ -122,10 +130,11 @@ export async function proposeMutation(
         item.kind === kind &&
         JSON.stringify(payloadOf(item).params) === JSON.stringify(params)
     );
-    if (rejected)
+    if (rejected) {
       throw new Error(
         "The human rejected this proposal. Respect that decision; ask a question if new evidence changes the recommendation."
       );
+    }
     const payload = {
       errorCode: "failed",
       baseHead,
@@ -142,7 +151,9 @@ export async function proposeMutation(
         payloadOf(item).baseHead === baseHead &&
         JSON.stringify(payloadOf(item).params) === JSON.stringify(params)
     );
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
     return jobsRepository.addItem({
       jobId: job.id,
       projectId: job.projectId,
@@ -167,7 +178,9 @@ export async function applyProposal(
     `--grep=${marker}`,
     "-1",
   ]);
-  if (previous.trim()) return previous.trim();
+  if (previous.trim()) {
+    return previous.trim();
+  }
   if (
     payloadOf(item).requiresVerification &&
     verificationOf(item)?.status !== "passed"
@@ -201,8 +214,9 @@ export async function applyProposal(
     }
     return withSpecLock(specId, async () => {
       const spec = await specsRepository.getSpec(specId);
-      if (!spec || spec.projectId !== item.projectId)
+      if (!spec || spec.projectId !== item.projectId) {
         throw new Error("Spec no longer exists in this project");
+      }
       return (
         await updateSpecInRepo(spec, patch, {
           ...options,

@@ -409,8 +409,11 @@ export function EnvironmentsSettingsCard({ projectId }: { projectId: string }) {
                       }
                       onValueChange={(value) => {
                         const next = { ...draft.credentialOverrides };
-                        if (value === "default") delete next[profile.name];
-                        else next[profile.name] = value;
+                        if (value === "default") {
+                          delete next[profile.name];
+                        } else {
+                          next[profile.name] = value;
+                        }
                         setDraft({ ...draft, credentialOverrides: next });
                       }}
                       disabled={busy}
@@ -480,7 +483,9 @@ export function EnvironmentsSettingsCard({ projectId }: { projectId: string }) {
         returnFocusRef={returnFocusRef}
         onCancel={() => setDeleting(null)}
         onConfirm={async () => {
-          if (!deleting) return;
+          if (!deleting) {
+            return;
+          }
           setBusy(true);
           try {
             await api(

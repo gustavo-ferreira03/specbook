@@ -36,17 +36,20 @@ export function access(
 ): MiddlewareHandler {
   const marker: MiddlewareHandler = async (_c, next) => next();
   policies.set(marker, rule);
-  if (verify) verifiers.set(marker, verify);
+  if (verify) {
+    verifiers.set(marker, verify);
+  }
   return marker;
 }
 
 export const routePolicy = (handler: Function) => policies.get(handler);
 
 export function requireBrowserSession(c: Context): void {
-  if (c.get("authentication") !== "session")
+  if (c.get("authentication") !== "session") {
     throw new HTTPException(403, {
       message: "Sign in to the web app to manage account or instance settings.",
     });
+  }
 }
 
 export const browserSession: MiddlewareHandler = async (c, next) => {
@@ -56,11 +59,14 @@ export const browserSession: MiddlewareHandler = async (c, next) => {
 
 export function requireRole(c: Context, role: UserRole): User {
   const user = c.get("user");
-  if (!user) throw new HTTPException(401, { message: "Sign in to continue." });
-  if (rank[user.role] < rank[role])
+  if (!user) {
+    throw new HTTPException(401, { message: "Sign in to continue." });
+  }
+  if (rank[user.role] < rank[role]) {
     throw new HTTPException(403, {
       message: "Your account does not have permission to do that.",
     });
+  }
   return user;
 }
 
@@ -92,22 +98,30 @@ export function accessGate(): MiddlewareHandler {
       : (session?.user ?? null);
     c.set("user", user);
     c.set("authentication", user ? (tokenRequest ? "token" : "session") : null);
-    if (!declared.length)
+    if (!declared.length) {
       throw new HTTPException(user ? 403 : 401, {
         message: "This endpoint is not available to your account.",
       });
-    if (required) requireRole(c, required);
-    if (required === "admin") requireBrowserSession(c);
+    }
+    if (required) {
+      requireRole(c, required);
+    }
+    if (required === "admin") {
+      requireBrowserSession(c);
+    }
     if (bearer) {
       const verify = handlers
         .map((handler) => verifiers.get(handler))
         .find(Boolean);
-      if (!verify)
+      if (!verify) {
         throw new HTTPException(401, {
           message: "This endpoint requires a verified token.",
         });
+      }
       const verdict = await verify(c);
-      if (verdict !== true) return verdict;
+      if (verdict !== true) {
+        return verdict;
+      }
     }
     const actor: Actor = user
       ? { id: user.id, name: user.name, email: user.email, kind: "user" }

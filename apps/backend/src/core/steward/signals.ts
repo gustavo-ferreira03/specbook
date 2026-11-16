@@ -36,7 +36,9 @@ export function runSignalForIntent(
     const signal = signals.find(
       (signal) => intent?.key === `signal:${signal.id}`
     );
-    if (signal) return signal;
+    if (signal) {
+      return signal;
+    }
     const parentId = /^resume-run:([^:]+):/.exec(intent.key)?.[1];
     intent = parentId ? intents.find((row) => row.id === parentId) : undefined;
   }
@@ -49,10 +51,15 @@ export function runTriggerForIntent(
   signals: ProjectSignal[]
 ): RunBatchTrigger {
   const signal = runSignalForIntent(intent, intents, signals);
-  if (signal?.kind === "deployment" || signal?.kind === "deployment_changed")
+  if (signal?.kind === "deployment" || signal?.kind === "deployment_changed") {
     return "deploy";
-  if (signal?.kind === "spec_changed") return "spec_change";
-  if (signal?.kind === "schedule") return "schedule";
+  }
+  if (signal?.kind === "spec_changed") {
+    return "spec_change";
+  }
+  if (signal?.kind === "schedule") {
+    return "schedule";
+  }
   return "manual";
 }
 
@@ -73,7 +80,9 @@ async function deploymentFingerprint(url: string): Promise<string> {
     try {
       while (html.length < 256_000) {
         const part = await reader.read();
-        if (part.done) break;
+        if (part.done) {
+          break;
+        }
         html += decoder.decode(part.value, { stream: true });
       }
     } finally {
@@ -166,13 +175,14 @@ export async function collectProjectSignals(
   observation.credentials = fingerprint(
     credentials.map((profile) => [profile.id, profile.updatedAt])
   );
-  if (credentials.length && previous.credentials !== observation.credentials)
+  if (credentials.length && previous.credentials !== observation.credentials) {
     await signal(
       "credentials_changed",
       `credentials:${observation.credentials}`,
       "Credentials are available",
       "Resume investigations that asked for access."
     );
+  }
   if (
     !previous.deployment ||
     previous.deployment.baseUrl !== project.baseUrl ||
@@ -193,7 +203,7 @@ export async function collectProjectSignals(
         failures: 0,
         generation,
       };
-      if (changed)
+      if (changed) {
         await signal(
           "deployment_changed",
           `deploy:${generation}:${fingerprint([old?.baseUrl, old?.fingerprint, project.baseUrl, next])}`,
@@ -201,6 +211,7 @@ export async function collectProjectSignals(
           "The app's build assets or response fingerprint changed. Run the existing Specs against this deployment.",
           { baseUrl: project.baseUrl, fingerprint: next, generation }
         );
+      }
     } else {
       const failures = (old?.failures ?? 0) + 1;
       const generation = (old?.generation ?? 0) + (failures === 1 ? 1 : 0);

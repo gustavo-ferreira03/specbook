@@ -293,10 +293,13 @@ describe("run evidence", () => {
           },
         ],
       },
-    ])
+    ]) {
       assert.equal(await decodeReplay(gzipSync(JSON.stringify(invalid))), null);
+    }
     let deep: unknown = "leaf";
-    for (let index = 0; index < 257; index++) deep = { child: deep };
+    for (let index = 0; index < 257; index++) {
+      deep = { child: deep };
+    }
     assert.equal(
       restoreReplayEvents([...events, { type: 3, timestamp: 3, data: deep }]),
       null
@@ -596,11 +599,12 @@ describe("run evidence", () => {
   test("reports historical execution order by title and normalizes failed step titles", async () => {
     const directory = tempDir();
     await fs.mkdir(path.join(directory, "evidence"));
-    for (const number of [1, 2])
+    for (const number of [1, 2]) {
       await fs.writeFile(
         path.join(directory, "evidence", `step-0${number}.png`),
         "png"
       );
+    }
     await fs.writeFile(
       path.join(directory, "evidence.json"),
       JSON.stringify({
@@ -741,8 +745,9 @@ describe("run evidence", () => {
       "evidence/step-100.png",
       "evidence/step-01.webp",
       "evidence/step-100.webp",
-    ])
+    ]) {
       assert.equal(isStepScreenshot(valid), true);
+    }
     for (const invalid of [
       "evidence/step-1.png",
       "evidence/step-1000.png",
@@ -752,8 +757,9 @@ describe("run evidence", () => {
       "evidence/step-01.webp/extra",
       "evidence/step-01.avif",
       "evidence/step-01.jpg",
-    ])
+    ]) {
       assert.equal(isStepScreenshot(invalid), false);
+    }
     assert.equal(
       stepScreenshotContentType("evidence/step-01.png"),
       "image/png"

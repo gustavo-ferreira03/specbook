@@ -19,7 +19,9 @@ const DIAGNOSTIC_LABELS = {
 
 export function RunDiagnostics({ evidence }: { evidence: RunEvidence }) {
   const diagnostics = evidence.diagnostics ?? [];
-  if (diagnostics.length === 0 && !evidence.errorContext) return null;
+  if (diagnostics.length === 0 && !evidence.errorContext) {
+    return null;
+  }
 
   return (
     <div className="space-y-3">

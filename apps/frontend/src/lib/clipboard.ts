@@ -9,7 +9,9 @@ export async function copyText(text: string): Promise<boolean> {
       return true;
     } catch {}
   }
-  if (typeof document === "undefined") return false;
+  if (typeof document === "undefined") {
+    return false;
+  }
   const previousFocus =
     document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -36,9 +38,13 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 export function selectElementText(element: HTMLElement | null): void {
-  if (!element) return;
+  if (!element) {
+    return;
+  }
   const selection = window.getSelection();
-  if (!selection) return;
+  if (!selection) {
+    return;
+  }
   const range = document.createRange();
   range.selectNodeContents(element);
   selection.removeAllRanges();

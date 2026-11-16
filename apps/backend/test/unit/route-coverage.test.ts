@@ -60,7 +60,9 @@ test("every endpoint declares access and protected routes deny anonymous request
   const middleware = new Set(["ALL *", "ALL /*", "ALL /projects/:id/jobs/*"]);
   let checked = 0;
   for (const [key, routes] of groups) {
-    if (middleware.has(key)) continue;
+    if (middleware.has(key)) {
+      continue;
+    }
     const policies = routes
       .map((route) => routePolicy(route.handler))
       .filter(Boolean);
@@ -70,7 +72,9 @@ test("every endpoint declares access and protected routes deny anonymous request
       `${key} must declare exactly one access policy`
     );
     checked++;
-    if (["public", "git-token", "ci-token"].includes(policies[0]!)) continue;
+    if (["public", "git-token", "ci-token"].includes(policies[0]!)) {
+      continue;
+    }
     const route = routes[0];
     const pathname = route.path
       .replace(/:\w+(?:\{[^}]+\})?/g, "00000000-0000-4000-8000-000000000000")

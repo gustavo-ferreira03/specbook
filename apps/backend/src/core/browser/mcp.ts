@@ -171,11 +171,12 @@ export async function launchBrowserMcp(opts: {
         undefined,
         { signal }
       );
-      if (result.isError)
+      if (result.isError) {
         throw new CodedError(
           "infrastructure",
           `The browser could not start: ${extractMcpText(result as { content?: unknown })}`
         );
+      }
     };
     const navigate = async (url: string, signal?: AbortSignal) => {
       for (let attempt = 0; ; attempt++) {
@@ -184,7 +185,9 @@ export async function launchBrowserMcp(opts: {
           undefined,
           { signal }
         );
-        if (!result.isError) return;
+        if (!result.isError) {
+          return;
+        }
         const text = extractMcpText(result as { content?: unknown });
         if (attempt < 3 && /is interrupted by another navigation/.test(text)) {
           await new Promise((resolve) => setTimeout(resolve, 300));
@@ -213,7 +216,9 @@ function inlineSnapshots(text: string, workDir: string): Promise<string> {
   const refs = [...text.matchAll(/\[Snapshot\]\(([^)]+)\)/g)].map(
     (match) => match[1]
   );
-  if (refs.length === 0) return Promise.resolve(text);
+  if (refs.length === 0) {
+    return Promise.resolve(text);
+  }
   return Promise.all(
     refs.map(async (ref) => {
       try {
@@ -293,11 +298,12 @@ export async function readBrowserSnapshot(
     undefined,
     { signal }
   );
-  if (result.isError)
+  if (result.isError) {
     throw new CodedError(
       "infrastructure",
       "The current browser snapshot could not be read."
     );
+  }
   const content = result as { content?: unknown };
   return mcp.workDir
     ? renderMcpResult(content, mcp.workDir)
@@ -324,13 +330,16 @@ export async function getActiveTabUrl(
       );
     });
   const text = extractMcpText(result as { content?: unknown });
-  if (result.isError)
+  if (result.isError) {
     throw new CodedError(
       "infrastructure",
       `The browser could not inspect its open tabs: ${text}`
     );
+  }
   const pageUrl = text.match(/^- Page URL: (\S+)/m);
-  if (pageUrl) return pageUrl[1];
+  if (pageUrl) {
+    return pageUrl[1];
+  }
   const currentTab = text
     .split("\n")
     .find((line) => line.includes("(current)"));
@@ -359,7 +368,9 @@ export function bridgeBrowserTools(
         async execute(_id, params, signal) {
           signal?.throwIfAborted();
           const args = (params ?? {}) as Record<string, unknown>;
-          if (tool.name === "browser_take_screenshot") delete args.filename;
+          if (tool.name === "browser_take_screenshot") {
+            delete args.filename;
+          }
           const clean = async (value: string) =>
             policy?.sanitizeResult ? await policy.sanitizeResult(value) : value;
           const toolError = async (text: string, errorCode?: ErrorCode) => ({
@@ -400,8 +411,9 @@ export function bridgeBrowserTools(
               workDir
             );
             images = mcpImages(result as { content?: unknown });
-            if (result.isError)
+            if (result.isError) {
               callError = `browser tool failed: ${resultText || "The browser returned an error without details."}`;
+            }
           } catch (error) {
             callErrorCode = errorCodeOf(error) ?? "infrastructure";
             callError = `browser tool failed: ${String(error)}`;
@@ -421,12 +433,15 @@ export function bridgeBrowserTools(
             }
           }
           signal?.throwIfAborted();
-          if (callError) return toolError(callError, callErrorCode);
+          if (callError) {
+            return toolError(callError, callErrorCode);
+          }
           const sendImages =
             images.length > 0 && (await policy?.sendScreenshots?.()) === true;
-          if (images.length > 0 && !sendImages)
+          if (images.length > 0 && !sendImages) {
             resultText +=
               "\nThe screenshot was withheld: screenshots are not sent to the model in this instance's security settings.";
+          }
           return {
             content: [
               {

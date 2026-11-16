@@ -32,14 +32,18 @@ function loadLibrary(): Promise<ReplayPlayerOptions["Player"]> {
     const script = document.createElement("script");
     script.textContent = await decompress(element?.textContent ?? "");
     document.head.append(script);
-    if (!window.rrwebPlayer) throw new Error("Replay player unavailable");
+    if (!window.rrwebPlayer) {
+      throw new Error("Replay player unavailable");
+    }
     return window.rrwebPlayer.default;
   })());
 }
 
 function load(section: HTMLDetailsElement): Promise<ReplayController | null> {
   const existing = instances.get(section);
-  if (existing) return existing;
+  if (existing) {
+    return existing;
+  }
   const task = (async () => {
     const replay = section.querySelector<HTMLElement>(".replay")!;
     try {
@@ -73,19 +77,30 @@ for (const section of document.querySelectorAll<HTMLDetailsElement>(
     const controls = section.open
       ? await load(section)
       : await instances.get(section);
-    if (!section.open) controls?.pause();
-    else controls?.resize();
+    if (!section.open) {
+      controls?.pause();
+    } else {
+      controls?.resize();
+    }
   });
-  if (section.open) void load(section);
+  if (section.open) {
+    void load(section);
+  }
   section.addEventListener("click", async (event) => {
     const link =
       event.target instanceof Element
         ? event.target.closest<HTMLElement>("[data-replay-step]")
         : null;
-    if (!link) return;
-    if (!link.classList.contains("zoom")) event.preventDefault();
+    if (!link) {
+      return;
+    }
+    if (!link.classList.contains("zoom")) {
+      event.preventDefault();
+    }
     const controls = await load(section);
-    if (!controls?.seekToStep(Number(link.dataset.replayStep))) return;
+    if (!controls?.seekToStep(Number(link.dataset.replayStep))) {
+      return;
+    }
     section
       .querySelectorAll<HTMLElement>("[data-replay-step]")
       .forEach((entry) =>

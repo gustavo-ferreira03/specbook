@@ -42,10 +42,12 @@ export function buildAllowedOrigins(
   const allowed = new Set([frontendOrigin]);
   try {
     const url = new URL(frontendOrigin);
-    if (url.hostname === "localhost")
+    if (url.hostname === "localhost") {
       allowed.add(`${url.protocol}//127.0.0.1:${url.port}`);
-    if (url.hostname === "127.0.0.1")
+    }
+    if (url.hostname === "127.0.0.1") {
       allowed.add(`${url.protocol}//localhost:${url.port}`);
+    }
   } catch {}
   return allowed;
 }

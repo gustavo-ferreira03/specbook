@@ -80,11 +80,14 @@ async function copyAuthentication(
     await fs.copyFile(source, target);
     await fs.chmod(target, 0o600);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    if (!apiKeyPresent)
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    if (!apiKeyPresent) {
       throw new Error(
         "The selected agent needs a file-backed login or its API key environment variable to run an isolated session"
       );
+    }
   }
 }
 
@@ -136,10 +139,11 @@ export async function prepareAgentInvocation(
       "--disable-slash-commands",
       "--no-chrome",
     ]) {
-      if (!help.includes(flag))
+      if (!help.includes(flag)) {
         throw new Error(
           `Update Claude Code: isolated Specbook sessions require ${flag}`
         );
+      }
     }
     return {
       command: agent,
@@ -198,10 +202,11 @@ export async function prepareAgentInvocation(
     "--sandbox",
     "--cd",
   ]) {
-    if (!help.includes(flag))
+    if (!help.includes(flag)) {
       throw new Error(
         `Update Codex: isolated Specbook sessions require ${flag}`
       );
+    }
   }
   if (resumeSessionId) {
     const resumeHelp = (
@@ -218,10 +223,11 @@ export async function prepareAgentInvocation(
       "--strict-config",
       "--json",
     ]) {
-      if (!resumeHelp.includes(flag))
+      if (!resumeHelp.includes(flag)) {
         throw new Error(
           `Update Codex: isolated Specbook resumes require ${flag}`
         );
+      }
     }
   }
   const featureOutput = (
@@ -235,10 +241,11 @@ export async function prepareAgentInvocation(
   const availableFeatures = new Set(
     featureOutput.split("\n").map((line) => line.trim().split(/\s+/)[0])
   );
-  if (!availableFeatures.has("shell_tool"))
+  if (!availableFeatures.has("shell_tool")) {
     throw new Error(
       "This Codex version cannot disable native command execution"
     );
+  }
   const catalogOutput = (
     await execute("codex", ["debug", "models", "--bundled"], {
       env,
@@ -257,10 +264,11 @@ export async function prepareAgentInvocation(
         !Object.hasOwn(model, "apply_patch_tool_type") ||
         !Object.hasOwn(model, "shell_type")
     )
-  )
+  ) {
     throw new Error(
       "The installed Codex model catalog cannot enforce Specbook-only tools"
     );
+  }
   for (const model of catalog.models) {
     model.apply_patch_tool_type = null;
     model.shell_type = "disabled";
@@ -291,14 +299,18 @@ export async function prepareAgentInvocation(
       },
     },
   };
-  for (const feature of disabledCodexFeatures)
+  for (const feature of disabledCodexFeatures) {
     if (availableFeatures.has(feature)) settings[`features.${feature}`] = false;
+  }
   const toml = (value: unknown): string => {
-    if (Array.isArray(value)) return `[${value.map(toml).join(",")}]`;
-    if (value && typeof value === "object")
+    if (Array.isArray(value)) {
+      return `[${value.map(toml).join(",")}]`;
+    }
+    if (value && typeof value === "object") {
       return `{${Object.entries(value)
         .map(([key, item]) => `${JSON.stringify(key)}=${toml(item)}`)
         .join(",")}}`;
+    }
     return JSON.stringify(value);
   };
   return {
@@ -330,17 +342,25 @@ export async function prepareAgentInvocation(
 }
 
 function stopProcess(child: ChildProcess): void {
-  if (!child.pid) return;
+  if (!child.pid) {
+    return;
+  }
   try {
-    if (process.platform === "win32") child.kill("SIGTERM");
-    else process.kill(-child.pid, "SIGTERM");
+    if (process.platform === "win32") {
+      child.kill("SIGTERM");
+    } else {
+      process.kill(-child.pid, "SIGTERM");
+    }
   } catch {
     return;
   }
   setTimeout(() => {
     try {
-      if (process.platform === "win32") child.kill("SIGKILL");
-      else process.kill(-child.pid!, "SIGKILL");
+      if (process.platform === "win32") {
+        child.kill("SIGKILL");
+      } else {
+        process.kill(-child.pid!, "SIGKILL");
+      }
     } catch {
       /* The process group has already exited. */
     }
@@ -375,7 +395,9 @@ export async function executeAgent(
     let persistenceError: unknown;
     const abort = () => stopProcess(child);
     signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) abort();
+    if (signal.aborted) {
+      abort();
+    }
     child.stdin!.on("error", () => {});
     child.once("spawn", () => {
       persistence = persistence
@@ -415,12 +437,15 @@ export async function executeAgent(
                 stopProcess(child);
               });
           }
-          if (event.type === "result")
+          if (event.type === "result") {
             output = event.result ?? event.error ?? "";
-          if (event.item?.type === "agent_message")
+          }
+          if (event.item?.type === "agent_message") {
             output = event.item.text ?? "";
-          if (event.type === "error" || event.type === "turn.failed")
+          }
+          if (event.type === "error" || event.type === "turn.failed") {
             errors = JSON.stringify(event);
+          }
           const name =
             event.type === "item.started" &&
             event.item?.type === "mcp_tool_call"
@@ -433,10 +458,11 @@ export async function executeAgent(
             /^(?:mcp__specbook__)?(?:browse_(?:open|snapshot|click|fill|inspect|close)|credentials_list|spec_(?:list|read|write|check)|run_spec|ask_question|propose_specs|request_credentials|report_done|report_failed)$/.test(
               name
             )
-          )
+          ) {
             process.stderr.write(
               `Specbook: ${name.replace(/^mcp__specbook__/, "")}\n`
             );
+          }
         } catch {
           errors = (errors + line + "\n").slice(-8000);
         }
@@ -452,14 +478,16 @@ export async function executeAgent(
     child.once("close", (code) => {
       signal.removeEventListener("abort", abort);
       void persistence.then(() => {
-        if (persistenceError) reject(persistenceError);
-        else
+        if (persistenceError) {
+          reject(persistenceError);
+        } else {
           resolve({
             code,
             output,
             errors,
             ...(sessionId ? { sessionId } : {}),
           });
+        }
       });
     });
   });
@@ -476,7 +504,7 @@ export async function confirmedResults(workspace: string, state: AgentState) {
       failReason?: string | null;
     }
   >();
-  for (const run of state.runs)
+  for (const run of state.runs) {
     for (const result of run.results)
       latest.set(result.path, {
         path: result.path,
@@ -485,8 +513,11 @@ export async function confirmedResults(workspace: string, state: AgentState) {
         report: run.report,
         failReason: result.failReason,
       });
+  }
   for (const result of latest.values()) {
-    if (result.status !== "passed") continue;
+    if (result.status !== "passed") {
+      continue;
+    }
     try {
       const source = await fs.readFile(
         await safeWorkspacePath(workspace, `${result.path}/spec.ts`),
@@ -508,8 +539,9 @@ export async function confirmedResults(workspace: string, state: AgentState) {
       if (
         source !== tested ||
         JSON.stringify(contract) !== JSON.stringify(testedContract)
-      )
+      ) {
         result.status = "changed_after_run";
+      }
     } catch {
       result.status = "changed_after_run";
     }

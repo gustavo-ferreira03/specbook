@@ -28,7 +28,9 @@ type JobPatch = Partial<
 const now = () => new Date().toISOString();
 
 function notifyChat(job: Job): void {
-  if (job.sourceChatId) publishChatUpdate(job.sourceChatId);
+  if (job.sourceChatId) {
+    publishChatUpdate(job.sourceChatId);
+  }
 }
 
 function requeuePatch(
@@ -167,7 +169,9 @@ export const jobsRepository = {
         patch.classification !== undefined ? "classified" : "status_changed"
       );
     }
-    if (job) notifyChat(job);
+    if (job) {
+      notifyChat(job);
+    }
   },
   async recordUsage(id: string, tokens: number, wallTimeMs = 0) {
     await db
@@ -219,7 +223,9 @@ export const jobsRepository = {
       .insert(jobActions)
       .values({ jobId, action, detail, createdAt: now() });
     const job = await this.get(jobId);
-    if (!job) return;
+    if (!job) {
+      return;
+    }
     await recordAudit(
       "agent.action",
       { jobId, action, detail },
@@ -234,7 +240,7 @@ export const jobsRepository = {
       action === "proposal:verified"
         ? /^([a-f0-9-]{36}): (passed|failed|error)$/.exec(detail)
         : null;
-    if (action === "stopped" || decision || verification)
+    if (action === "stopped" || decision || verification) {
       await recordAgentMetric(
         job,
         decision ? "decision" : verification ? "verified" : "stopped",
@@ -244,6 +250,7 @@ export const jobsRepository = {
             ? { itemId: verification[1], verificationStatus: verification[2] }
             : {}
       );
+    }
   },
   async actions(jobId: string) {
     return db
@@ -256,13 +263,16 @@ export const jobsRepository = {
     const grouped = new Map<string, (typeof jobActions.$inferSelect)[]>(
       jobIds.map((id) => [id, []])
     );
-    if (!jobIds.length) return grouped;
+    if (!jobIds.length) {
+      return grouped;
+    }
     for (const action of await db
       .select()
       .from(jobActions)
       .where(inArray(jobActions.jobId, jobIds))
-      .orderBy(asc(jobActions.id)))
+      .orderBy(asc(jobActions.id))) {
       grouped.get(action.jobId)?.push(action);
+    }
     return grouped;
   },
   async addItem(
@@ -287,14 +297,18 @@ export const jobsRepository = {
         updatedAt: now(),
       })
       .returning();
-    if (job && item!.kind !== "note")
+    if (job && item!.kind !== "note") {
       await recordAgentMetric(job, "item_created", {
         itemId: item!.id,
         itemKind: item!.kind,
       });
-    if (job) notifyChat(job);
-    if (typeof payload.sourceChatId === "string")
+    }
+    if (job) {
+      notifyChat(job);
+    }
+    if (typeof payload.sourceChatId === "string") {
       publishChatUpdate(payload.sourceChatId);
+    }
     return item!;
   },
   async inbox(projectId: string) {
@@ -389,7 +403,9 @@ export const jobsRepository = {
     jobIds: string[],
     filters: { kind?: InboxItem["kind"]; statuses?: InboxItem["status"][] } = {}
   ) {
-    if (!jobIds.length) return [];
+    if (!jobIds.length) {
+      return [];
+    }
     return db
       .select()
       .from(inboxItems)
@@ -448,17 +464,22 @@ export const jobsRepository = {
       .returning();
     if (item) {
       const job = await this.get(item.jobId);
-      if (job) notifyChat(job);
+      if (job) {
+        notifyChat(job);
+      }
       for (const chatId of [
         payloadOf(item).sourceChatId,
         payloadOf(item).discussionChatId,
-      ])
+      ]) {
         if (typeof chatId === "string") publishChatUpdate(chatId);
+      }
     }
   },
   async answer(item: InboxItem, answer: string) {
     const job = await this.get(item.jobId);
-    if (!job) throw new Error("The investigation no longer exists");
+    if (!job) {
+      throw new Error("The investigation no longer exists");
+    }
     const deterministic = payloadOf(item).runIntentId === job.id;
     const [resumed] = await db.batch([
       db
@@ -500,10 +521,11 @@ export const jobsRepository = {
           )
         ),
     ]);
-    if (!resumed.length)
+    if (!resumed.length) {
       throw new Error(
         "The job is no longer paused; its answer was not applied"
       );
+    }
     const updated = await this.get(job.id);
     if (updated) {
       await recordAgentMetric(updated, "status_changed");

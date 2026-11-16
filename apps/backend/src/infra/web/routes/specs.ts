@@ -81,15 +81,18 @@ const updateSpecSchema = z
   );
 
 function mapManualError(error: unknown): never {
-  if (error instanceof HTTPException) throw error;
+  if (error instanceof HTTPException) {
+    throw error;
+  }
   if (
     error instanceof ResourceBusyError ||
     error instanceof UnsafeRepoPathError
   ) {
     throw new HTTPException(409, { message: error.message });
   }
-  if (error instanceof YamlParseError)
+  if (error instanceof YamlParseError) {
     throw new HTTPException(400, { message: error.message });
+  }
   if (
     error instanceof Error &&
     /unfinished rebase|uncommitted changes/.test(error.message)
@@ -104,8 +107,9 @@ export function createSpecsRouter(): Hono {
 
   router.get("/projects/:id/specs/files", access("viewer"), async (c) => {
     const projectId = c.req.param("id");
-    if (!(await projectsRepository.getProject(projectId)))
+    if (!(await projectsRepository.getProject(projectId))) {
       throw new HTTPException(404, { message: "Project not found" });
+    }
     return c.json(await readProjectSpecFiles(projectId));
   });
 
@@ -115,8 +119,9 @@ export function createSpecsRouter(): Hono {
     zValidator("json", publishSchema),
     async (c) => {
       const projectId = c.req.param("id");
-      if (!(await projectsRepository.getProject(projectId)))
+      if (!(await projectsRepository.getProject(projectId))) {
         throw new HTTPException(404, { message: "Project not found" });
+      }
       const body = c.req.valid("json");
       try {
         const environment = await resolveRunEnvironment(
@@ -127,7 +132,7 @@ export function createSpecsRouter(): Hono {
           await publishSpecsInRepo(projectId, environment.id, body.specs)
         );
       } catch (error) {
-        if (error instanceof SpecRevisionConflict)
+        if (error instanceof SpecRevisionConflict) {
           return c.json(
             {
               error: error.message,
@@ -137,21 +142,25 @@ export function createSpecsRouter(): Hono {
             },
             409
           );
+        }
         if (
           error instanceof ResourceBusyError ||
           error instanceof UnsafeRepoPathError
-        )
+        ) {
           throw new HTTPException(409, { message: error.message });
+        }
         if (
           error instanceof SpecPublishValidationError ||
           error instanceof YamlParseError ||
           error instanceof NetworkTargetError
-        )
+        ) {
           throw new HTTPException(400, { message: error.message });
-        if (error instanceof z.ZodError)
+        }
+        if (error instanceof z.ZodError) {
           throw new HTTPException(400, {
             message: "Provide valid Spec and Feature YAML before publishing.",
           });
+        }
         throw error;
       }
     }
@@ -159,7 +168,9 @@ export function createSpecsRouter(): Hono {
 
   router.get("/specs/:id", access("viewer"), async (c) => {
     const spec = await specsRepository.getSpec(c.req.param("id"));
-    if (!spec) throw new HTTPException(404, { message: "Spec not found" });
+    if (!spec) {
+      throw new HTTPException(404, { message: "Spec not found" });
+    }
     const limit = Number.parseInt(c.req.query("limit") ?? "", 10);
     return c.json(
       await specDetail(
@@ -178,7 +189,9 @@ export function createSpecsRouter(): Hono {
         c.req.param("id"),
         c.req.valid("json")
       ).catch(mapManualError);
-      if (!result) throw new HTTPException(404, { message: "Spec not found" });
+      if (!result) {
+        throw new HTTPException(404, { message: "Spec not found" });
+      }
       return c.json(await specDetail(result.spec));
     }
   );
@@ -189,7 +202,9 @@ export function createSpecsRouter(): Hono {
     zValidator("json", editFilesSchema),
     async (c) => {
       const spec = await specsRepository.getSpec(c.req.param("id"));
-      if (!spec) throw new HTTPException(404, { message: "Spec not found" });
+      if (!spec) {
+        throw new HTTPException(404, { message: "Spec not found" });
+      }
       const body = c.req.valid("json");
       const updated = await editSpecFiles(spec, body).catch(mapManualError);
       return c.json(await specDetail(updated));

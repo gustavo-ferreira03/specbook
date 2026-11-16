@@ -150,7 +150,9 @@ function indexBatch(batch: RunBatch): void {
   if (previousProject && previousProject !== batch.projectId) {
     const previous = batchIndex.get(previousProject);
     previous?.delete(batch.id);
-    if (!previous?.size) batchIndex.delete(previousProject);
+    if (!previous?.size) {
+      batchIndex.delete(previousProject);
+    }
   }
   let project = batchIndex.get(batch.projectId);
   if (!project) {
@@ -165,7 +167,9 @@ function indexBatch(batch: RunBatch): void {
     indexedBatchIds.delete(id);
     const entries = batchIndex.get(projectId)!;
     entries.delete(id);
-    if (!entries.size) batchIndex.delete(projectId);
+    if (!entries.size) {
+      batchIndex.delete(projectId);
+    }
   }
 }
 
@@ -175,26 +179,34 @@ async function ensureBatchIndex(
   const entries = await fs
     .readdir(runBatchesDir, { withFileTypes: true })
     .catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return [];
+      if (error.code === "ENOENT") {
+        return [];
+      }
       throw error;
     });
   const project = new Map<string, { startedAt: string; ci: boolean }>();
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
     let indexedProject = indexedBatchIds.get(entry.name);
     let metadata = indexedProject
       ? batchIndex.get(indexedProject)?.get(entry.name)
       : undefined;
     if (!metadata) {
       const batch = await getRunBatch(entry.name);
-      if (!batch) continue;
+      if (!batch) {
+        continue;
+      }
       indexedProject = batch.projectId;
       metadata = { startedAt: batch.startedAt, ci: Boolean(batch.ci) };
     } else {
       indexedBatchIds.delete(entry.name);
       indexedBatchIds.set(entry.name, indexedProject!);
     }
-    if (indexedProject === projectId) project.set(entry.name, metadata);
+    if (indexedProject === projectId) {
+      project.set(entry.name, metadata);
+    }
   }
   return project;
 }
@@ -202,7 +214,9 @@ async function ensureBatchIndex(
 function batchDirectory(id: string): string {
   const root = path.resolve(runBatchesDir);
   const directory = path.resolve(root, id);
-  if (path.dirname(directory) !== root) throw new Error("Invalid run batch id");
+  if (path.dirname(directory) !== root) {
+    throw new Error("Invalid run batch id");
+  }
   return directory;
 }
 
@@ -224,7 +238,9 @@ export async function getRunBatch(id: string): Promise<RunBatch | null> {
     indexBatch(batch);
     return batch;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
     throw error;
   }
 }
@@ -269,12 +285,13 @@ async function finishPreparedSpec(
   const runDir = path.join(runsDir, prepared.run.id);
   try {
     await fs.mkdir(runDir, { recursive: true });
-    if (!options)
+    if (!options) {
       await fs.writeFile(
         path.join(runDir, "batch.json"),
         JSON.stringify({ batchId }),
         "utf8"
       );
+    }
     if (
       !(await fs.stat(path.join(runDir, "evidence.json")).catch(() => null))
     ) {
@@ -285,7 +302,9 @@ async function finishPreparedSpec(
       );
     }
   } catch (error) {
-    if (!options) throw error;
+    if (!options) {
+      throw error;
+    }
   }
   await runsRepository.finishRun(
     prepared.run.id,
@@ -296,7 +315,9 @@ async function finishPreparedSpec(
   );
   if (options) {
     const stored = await runsRepository.getRun(prepared.run.id);
-    if (!stored) throw new Error("Run disappeared");
+    if (!stored) {
+      throw new Error("Run disappeared");
+    }
     prepared.finished = {
       ...stored,
       failedStep:
@@ -329,19 +350,20 @@ async function finishPreparedSpec(
         (result.status === "passed" &&
           prepared.run.baseUrl === prepared.run.environment?.configuredBaseUrl))
     ) {
-      if (prepared.run.environment)
+      if (prepared.run.environment) {
         await specEnvironmentsRepository.set(
           current,
           prepared.run.environment.id,
           result.status
         );
-      else
+      } else {
         await specsRepository.updateSpecStatusForContent(
           current.id,
           current.sourceHash,
           current.markdownHash,
           result.status
         );
+      }
     }
   }
   prepared.item.status = result.status;
@@ -459,7 +481,7 @@ async function executeBatch(
     }
   } catch (error) {
     processFailure = error instanceof Error ? error.message : String(error);
-    for (const entry of prepared)
+    for (const entry of prepared) {
       results.set(entry.run.id, {
         status: "error",
         durationMs: null,
@@ -469,6 +491,7 @@ async function executeBatch(
           ? "cancelled"
           : (errorCodeOf(error) ?? "infrastructure"),
       });
+    }
   }
   try {
     for (const entry of prepared) {
@@ -487,9 +510,11 @@ async function executeBatch(
           options,
           result.failedStep
         );
-      if (batch.environment?.executor === "tunnel")
+      if (batch.environment?.executor === "tunnel") {
         await withSpecLock(entry.item.specId, finish);
-      else await finish();
+      } else {
+        await finish();
+      }
     }
     batch.status = processFailure
       ? "error"
@@ -501,10 +526,14 @@ async function executeBatch(
         : "passed";
     batch.failReason = processFailure;
   } catch (error) {
-    if (options) throw error;
+    if (options) {
+      throw error;
+    }
     const message = error instanceof Error ? error.message : String(error);
     for (const entry of prepared) {
-      if (entry.item.status !== "running") continue;
+      if (entry.item.status !== "running") {
+        continue;
+      }
       const finish = () =>
         finishPreparedSpec(
           batch.id,
@@ -529,8 +558,9 @@ async function executeBatch(
         batch.failReason === null
           ? null
           : secrets.scrub(batch.failReason).slice(0, MAX_FAIL_REASON_CHARS);
-      if (!options || batch.environment?.executor === "tunnel")
+      if (!options || batch.environment?.executor === "tunnel") {
         await writeBatch(batch);
+      }
     }
   }
 }
@@ -565,12 +595,13 @@ async function prepareSpecBatch(
       }[] = [];
       for (const id of ids) {
         const spec = await specsRepository.getSpec(id);
-        if (!spec || spec.projectId !== projectId)
+        if (!spec || spec.projectId !== projectId) {
           throw new Error(
             options
               ? "This Spec was removed. Refresh the project to see its current Specs."
               : `Spec ${id} not found in this project`
           );
+        }
         if (spec.status === "invalid") {
           throw new CodedError(
             "invalid_spec",
@@ -749,8 +780,9 @@ async function prepareSpecBatch(
       : {}),
   };
   try {
-    if (!options || remote || environment?.executor === "tunnel")
+    if (!options || remote || environment?.executor === "tunnel") {
       await writeBatch(batch);
+    }
   } catch (error) {
     await rollback();
     throw error;
@@ -839,15 +871,20 @@ export async function finishRunnerBatch(
   completion: RunnerCompletion
 ): Promise<void> {
   const batch = await getRunBatch(batchId);
-  if (!batch || batch.environment?.executor !== "runner")
+  if (!batch || batch.environment?.executor !== "runner") {
     throw new Error("Runner batch not found");
-  if (batch.status !== "running") return;
+  }
+  if (batch.status !== "running") {
+    return;
+  }
   for (const item of batch.specs) {
     const run = await runsRepository.getRun(item.runId);
     const result = completion.results.find(
       (entry) => entry.runId === item.runId
     );
-    if (!run || !result) throw new Error("Runner result is missing a Spec");
+    if (!run || !result) {
+      throw new Error("Runner result is missing a Spec");
+    }
     const directory = path.join(runsDir, run.id);
     const [markdown, testSource] = await Promise.all([
       fs.readFile(path.join(directory, "spec.yml"), "utf8"),
@@ -894,7 +931,7 @@ export async function failBrokenRunnerBatch(
   for (const spec of job.payload.specs) {
     const run = await runsRepository.getRun(spec.runId);
     environment ??= run?.environment ?? undefined;
-    if (run)
+    if (run) {
       await withSpecLock(spec.specId, async () => {
         const current = await specsRepository.getSpec(spec.specId);
         if (
@@ -924,6 +961,7 @@ export async function failBrokenRunnerBatch(
           error,
         })
       );
+    }
     items.push({
       runId: spec.runId,
       specId: spec.specId,
@@ -961,7 +999,9 @@ async function waitRunnerBatch(
       signal?.throwIfAborted();
       await maintainRunnerQueue();
       const completed = await getRunBatch(batch.id).catch(() => null);
-      if (completed && completed.status !== "running") return completed;
+      if (completed && completed.status !== "running") {
+        return completed;
+      }
       const job = await runnersRepository.jobByBatch(batch.id);
       if (job?.status === "completed") {
         const failReason =
@@ -1005,8 +1045,9 @@ async function waitRunnerBatch(
           artifacts: [],
         })),
       });
-      for (const item of batch.specs)
+      for (const item of batch.specs) {
         await runsRepository.acknowledgeAutomation(item.runId);
+      }
     }
     throw error;
   }
@@ -1022,7 +1063,9 @@ export async function verifyRunnerCandidate(input: {
   signal?: AbortSignal;
 }): Promise<ExecutedRun & { status: FinalRunStatus }> {
   const spec = await specsRepository.getSpec(input.specId);
-  if (!spec) throw new Error("Spec no longer exists");
+  if (!spec) {
+    throw new Error("Spec no longer exists");
+  }
   input.signal?.throwIfAborted();
   const analysis = analyzeForRun(spec.title, input.testSource, input.markdown);
   const commitSha = await repoGit.getHeadSha(spec.projectId);
@@ -1075,9 +1118,12 @@ export async function verifyRunnerCandidate(input: {
     await dispatchRunnerBatch(batch, [prepared], input.timeoutMs);
     await waitRunnerBatch(batch, input.signal);
     const result = await runsRepository.getRun(run.id);
-    if (!result) throw new Error("Runner verification result disappeared");
-    if (result.status === "running")
+    if (!result) {
+      throw new Error("Runner verification result disappeared");
+    }
+    if (result.status === "running") {
       throw new Error("Runner verification is incomplete");
+    }
     const manifest = await readEvidenceManifest(directory);
     await fs.cp(directory, input.directory, { recursive: true });
     return {
@@ -1105,9 +1151,13 @@ export async function executeSingleSpecBatch(
   let released = false;
   try {
     const spec = await specsRepository.getSpec(specId);
-    if (!spec) throw new Error("Spec not found");
+    if (!spec) {
+      throw new Error("Spec not found");
+    }
     const project = await projectsRepository.getProject(spec.projectId);
-    if (!project) throw new Error("Project not found");
+    if (!project) {
+      throw new Error("Project not found");
+    }
     const environment =
       typeof options.environment === "object"
         ? options.environment
@@ -1119,10 +1169,11 @@ export async function executeSingleSpecBatch(
     if (
       environment.executor !== "server" &&
       (await runsRepository.hasRunningRuns([specId]))
-    )
+    ) {
       throw new ResourceBusyError(
         "This Spec already has a run queued or in progress; retry after it finishes"
       );
+    }
     const { batch, prepared, secrets } = await prepareSpecBatch(
       project.id,
       [specId],
@@ -1156,13 +1207,16 @@ export async function executeSingleSpecBatch(
       released = true;
     }
     await executeBatch(batch, prepared, batch.baseUrl!, secrets, options);
-    if (!prepared[0].finished)
+    if (!prepared[0].finished) {
       throw new TunnelWaitInterrupted(
         "Backend stopped while waiting for a tunnel"
       );
+    }
     return prepared[0].finished!;
   } finally {
-    if (!released) await release();
+    if (!released) {
+      await release();
+    }
   }
 }
 
@@ -1181,7 +1235,9 @@ export async function startSpecBatch(
   } = {}
 ): Promise<RunBatch> {
   const project = await projectsRepository.getProject(projectId);
-  if (!project) throw new Error("Project not found");
+  if (!project) {
+    throw new Error("Project not found");
+  }
   const environment =
     typeof options.environment === "object"
       ? options.environment
@@ -1191,14 +1247,17 @@ export async function startSpecBatch(
           options.baseUrl
         );
   const ids = [...new Set(specIds)];
-  if (ids.length === 0) throw new Error("Select at least one Spec");
+  if (ids.length === 0) {
+    throw new Error("Select at least one Spec");
+  }
   if (
     (options.rejectIfBusy || environment.executor !== "server") &&
     (await runsRepository.hasRunningRuns(ids))
-  )
+  ) {
     throw new ResourceBusyError(
       "Selected Specs are already running; retry after they finish"
     );
+  }
   const releaseSpecLocks = await acquireSpecLocks(ids, {
     wait: !options.rejectIfBusy,
   });
@@ -1209,10 +1268,11 @@ export async function startSpecBatch(
     if (
       environment.executor !== "server" &&
       (await runsRepository.hasRunningRuns(ids))
-    )
+    ) {
       throw new ResourceBusyError(
         "Selected Specs are already running; retry after they finish"
       );
+    }
     ({ batch, prepared, secrets } = await prepareSpecBatch(
       projectId,
       ids,
@@ -1281,7 +1341,9 @@ export async function pendingTunnelBatchRunIds(): Promise<string[]> {
   const entries = await fs
     .readdir(runBatchesDir, { withFileTypes: true, encoding: "utf8" })
     .catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return [];
+      if (error.code === "ENOENT") {
+        return [];
+      }
       throw error;
     });
   const batches = await Promise.all(
@@ -1311,8 +1373,9 @@ async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
     const prepared = await Promise.all(
       batch.specs.map(async (item): Promise<PreparedSpec> => {
         const run = await runsRepository.getRun(item.runId);
-        if (!run || run.status !== "running")
+        if (!run || run.status !== "running") {
           throw new Error("Queued tunnel run is missing");
+        }
         const directory = path.join(runsDir, item.runId);
         const [testSource, markdown] = await Promise.all([
           fs.readFile(path.join(directory, "spec.ts"), "utf8"),
@@ -1321,8 +1384,9 @@ async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
         if (
           sourceHashOf(testSource) !== item.sourceHash ||
           markdownHashOf(markdown) !== item.markdownHash
-        )
+        ) {
           throw new Error("Queued tunnel Spec files changed");
+        }
         return {
           run,
           projectId: batch.projectId,
@@ -1343,8 +1407,9 @@ async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
     const current = (await environmentsRepository.list(batch.projectId)).find(
       (entry) => entry.id === batch.environment!.id
     );
-    if (!current)
+    if (!current) {
       throw new Error("The queued run's tunnel environment was removed");
+    }
     const environment = await resolveRunEnvironment(
       batch.projectId,
       current.name,
@@ -1353,19 +1418,21 @@ async function resumeTunnelBatch(batch: RunBatch): Promise<void> {
     if (
       environment.executor !== "tunnel" ||
       environment.id !== batch.environment!.id
-    )
+    ) {
       throw new Error("The queued run's tunnel environment changed");
+    }
     batch.environment = environment;
     const { env, missing } = await resolveSecretEnv(
       batch.projectId,
       refs,
       environment.credentialOverrides
     );
-    if (missing.length)
+    if (missing.length) {
       throw new CodedError(
         "credentials",
         `Missing credentials: ${missing.join(", ")}. Configure them in Settings → Credentials.`
       );
+    }
     const secrets = {
       env,
       origins: await resolveSecretOriginPolicy(
@@ -1420,12 +1487,18 @@ export async function markInterruptedBatches(): Promise<void> {
       encoding: "utf8",
     });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
     throw error;
   }
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (pendingRunners.has(entry.name)) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    if (pendingRunners.has(entry.name)) {
+      continue;
+    }
     const batch = await getRunBatch(entry.name).catch((error: unknown) => {
       logger.error("could not recover interrupted batch", {
         batchId: entry.name,
@@ -1433,7 +1506,9 @@ export async function markInterruptedBatches(): Promise<void> {
       });
       return null;
     });
-    if (!batch || batch.status !== "running") continue;
+    if (!batch || batch.status !== "running") {
+      continue;
+    }
     if (batch.environment?.executor === "tunnel" && batch.waitingForTunnelAt) {
       await resumeTunnelBatch(batch);
       continue;
@@ -1456,7 +1531,9 @@ async function readListedBatch(id: string): Promise<RunBatch | null> {
     .stat(path.join(batchDirectory(id), "batch.json"))
     .then((stat) => `${stat.ino}:${stat.mtimeMs}:${stat.size}`)
     .catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return null;
+      if (error.code === "ENOENT") {
+        return null;
+      }
       throw error;
     });
   const cached = finishedBatches.get(id);
@@ -1466,12 +1543,15 @@ async function readListedBatch(id: string): Promise<RunBatch | null> {
     return cached.batch;
   }
   finishedBatches.delete(id);
-  if (!stamp) return null;
+  if (!stamp) {
+    return null;
+  }
   const batch = await getRunBatch(id);
   if (batch && batch.status !== "running") {
     finishedBatches.set(id, { stamp, batch });
-    while (finishedBatches.size > MAX_CACHED_BATCHES)
+    while (finishedBatches.size > MAX_CACHED_BATCHES) {
       finishedBatches.delete(finishedBatches.keys().next().value!);
+    }
   }
   return batch;
 }
@@ -1492,9 +1572,11 @@ export async function listRunBatches(
     const loaded = await Promise.all(window.map(([id]) => readListedBatch(id)));
     window.forEach(([id], index) => {
       const batch = loaded[index];
-      if (!batch) project.delete(id);
-      else if (batch.projectId === projectId && (!ciOnly || batch.ci))
+      if (!batch) {
+        project.delete(id);
+      } else if (batch.projectId === projectId && (!ciOnly || batch.ci)) {
         batches.push(batch);
+      }
     });
   }
   return batches;

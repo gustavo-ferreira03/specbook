@@ -36,7 +36,9 @@ function LoginContent() {
       oidcEnabled: boolean;
     }>("/auth/options")
       .then((result) => {
-        if (!active) return;
+        if (!active) {
+          return;
+        }
         if (result.needsAdmin) {
           router.replace("/setup");
           return;
@@ -44,7 +46,9 @@ function LoginContent() {
         setOptions(result);
       })
       .catch((reason) => {
-        if (active) setError(errorMessage(reason));
+        if (active) {
+          setError(errorMessage(reason));
+        }
       });
     return () => {
       active = false;

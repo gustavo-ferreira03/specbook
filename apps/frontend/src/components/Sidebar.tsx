@@ -187,7 +187,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
   useEffect(() => {
     const query = window.matchMedia("(min-width: 768px)");
     const handleChange = (event: MediaQueryListEvent) => {
-      if (event.matches) setDrawerOpen(false);
+      if (event.matches) {
+        setDrawerOpen(false);
+      }
     };
     query.addEventListener("change", handleChange);
     return () => query.removeEventListener("change", handleChange);
@@ -204,7 +206,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
         getProjectTree(projectId, signal),
         listProjectChats(projectId, signal),
       ]);
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        return;
+      }
       setProjects(projectsResult.projects);
       setFeatures(treeResult.features);
       setSpecs(treeResult.specs);
@@ -212,7 +216,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
       setLoadError("");
       setLoaded(true);
     } catch (error) {
-      if (signal.aborted || isAbortError(error)) return;
+      if (signal.aborted || isAbortError(error)) {
+        return;
+      }
       setLoadError(errorMessage(error));
       setLoaded(true);
     }
@@ -228,7 +234,7 @@ export function Sidebar({ projectId }: { projectId: string }) {
         getHealth(signal),
         getLlmRuntimeStatus(),
       ]);
-      if (!signal.aborted)
+      if (!signal.aborted) {
         setRuntime(
           !health.ok
             ? "offline"
@@ -236,8 +242,11 @@ export function Sidebar({ projectId }: { projectId: string }) {
               ? "setup"
               : "online"
         );
+      }
     } catch (error) {
-      if (!signal.aborted && !isAbortError(error)) setRuntime("offline");
+      if (!signal.aborted && !isAbortError(error)) {
+        setRuntime("offline");
+      }
     }
   }
 
@@ -301,7 +310,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
       (spec) => pathname === `/p/${projectId}/specs/${spec.id}`
     );
     const startId = activeSpec?.featureId;
-    if (!startId) return;
+    if (!startId) {
+      return;
+    }
     const ids = new Set<string>();
     let feature = features.find((item) => item.id === startId);
     while (feature) {
@@ -345,8 +356,11 @@ export function Sidebar({ projectId }: { projectId: string }) {
   function setFeatureExpanded(featureId: string, expanded: boolean) {
     setExpandedFeatures((current) => {
       const next = new Set(current);
-      if (expanded) next.add(featureId);
-      else next.delete(featureId);
+      if (expanded) {
+        next.add(featureId);
+      } else {
+        next.delete(featureId);
+      }
       return next;
     });
   }
@@ -368,7 +382,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
   }
 
   async function deleteItem() {
-    if (!deleteTarget || deletingItem) return;
+    if (!deleteTarget || deletingItem) {
+      return;
+    }
     setDeletingItem(true);
     setDeleteError("");
     try {
@@ -616,7 +632,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
   }
 
   function renderLoadError() {
-    if (!loadError) return null;
+    if (!loadError) {
+      return null;
+    }
     return (
       <Alert variant="danger" className="mx-3 mb-2 w-auto">
         <AlertTitle className="flex items-center gap-1.5">
@@ -638,7 +656,9 @@ export function Sidebar({ projectId }: { projectId: string }) {
   }
 
   function renderLoading() {
-    if (loaded) return null;
+    if (loaded) {
+      return null;
+    }
     return (
       <div
         className="space-y-1 px-2 pt-1"

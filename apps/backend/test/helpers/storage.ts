@@ -4,7 +4,9 @@ import path from "node:path";
 
 const cleanup = new Set<string>();
 process.once("exit", () => {
-  for (const dir of cleanup) fs.rmSync(dir, { recursive: true, force: true });
+  for (const dir of cleanup) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 function removeOnExit(dir: string): void {

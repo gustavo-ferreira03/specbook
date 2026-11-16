@@ -107,8 +107,9 @@ async function createResourceLoader(
 }
 
 export function startChatTurn(id: string, userText: string): void {
-  if (!tryReserveChatTurn(id))
+  if (!tryReserveChatTurn(id)) {
     throw new ChatBusyError("The agent is still replying");
+  }
   void runReservedChatTurn(id, userText, undefined, "message").catch(
     console.error
   );
@@ -119,8 +120,9 @@ export async function startBranchedChatTurn(
   messageId: string,
   options: { editedText?: string; userOnly?: boolean } = {}
 ): Promise<void> {
-  if (!tryReserveChatTurn(id))
+  if (!tryReserveChatTurn(id)) {
     throw new ChatBusyError("The agent is still replying");
+  }
   let branch: Awaited<ReturnType<typeof branchSessionForTurn>>;
   try {
     branch = await branchSessionForTurn(id, messageId, options);
@@ -144,7 +146,9 @@ export async function branchChatForTurn(
   messageId: string,
   options: { editedText?: string; userOnly?: boolean } = {}
 ): Promise<{ text: string; sessionManager: SessionManager }> {
-  if (!tryReserveChatTurn(id)) throw new Error("The agent is still replying");
+  if (!tryReserveChatTurn(id)) {
+    throw new Error("The agent is still replying");
+  }
   try {
     return await branchSessionForTurn(id, messageId, options);
   } finally {
@@ -164,7 +168,9 @@ export async function runChatTurn(
   existingSessionManager?: SessionManager,
   policy?: TurnPolicy
 ): Promise<TurnOutcome> {
-  if (!tryReserveChatTurn(id)) return { status: "busy" };
+  if (!tryReserveChatTurn(id)) {
+    return { status: "busy" };
+  }
   return runReservedChatTurn(
     id,
     userText,
@@ -208,7 +214,9 @@ async function runReservedChatTurn(
   const fail = async (code: ErrorCode, message: string) => {
     outcome = { status: "failed", errorCode: code, message };
     const job = await jobsRepository.forChat(id);
-    if (job) await jobsRepository.update(job.id, { errorCode: code });
+    if (job) {
+      await jobsRepository.update(job.id, { errorCode: code });
+    }
   };
   try {
     if (consumeAbortRequest(id)) {
@@ -316,7 +324,7 @@ async function runReservedChatTurn(
     let chatBrowser: Awaited<ReturnType<typeof getOrCreateChatBrowser>> | null =
       null;
     const scrub = createProjectScrubber(row.projectId);
-    if (!runnerEnvironment)
+    if (!runnerEnvironment) {
       try {
         const startUrl = discoveryRevision?.brief.startUrl ?? project.baseUrl;
         const profiles = await credentialsRepository.listProfiles(
@@ -386,6 +394,7 @@ async function runReservedChatTurn(
         }
         appendWarning(sessionManager, browserFailureMessage(error));
       }
+    }
 
     const credentialTools = runnerEnvironment
       ? []
@@ -418,7 +427,9 @@ async function runReservedChatTurn(
           scrub,
           recordEvidence: async (json) => {
             const job = await jobsRepository.forChat(id);
-            if (job) await jobsRepository.log(job.id, "page_scan", json);
+            if (job) {
+              await jobsRepository.log(job.id, "page_scan", json);
+            }
             return `/p/${row.projectId}/chats/${job?.sourceChatId ?? id}`;
           },
         });
@@ -532,7 +543,9 @@ async function runReservedChatTurn(
         value.assistantMessageEvent?.type === "text_delta"
       ) {
         const delta = value.assistantMessageEvent.delta;
-        if (delta) publishChatUpdate(id, { type: "assistant_delta", delta });
+        if (delta) {
+          publishChatUpdate(id, { type: "assistant_delta", delta });
+        }
       }
       if (value.type === "message_end" && value.message?.role === "assistant") {
         metrics.assistantMessage(value.message);
@@ -646,8 +659,9 @@ async function runReservedChatTurn(
       await withTurnTimeout(
         async () => {
           const promptPromise = session.prompt(userText);
-          for (const followUp of queuedFollowUps)
+          for (const followUp of queuedFollowUps) {
             await session.followUp(followUp);
+          }
           await promptPromise;
         },
         async () => {
@@ -698,10 +712,14 @@ async function runReservedChatTurn(
       aborted ? "aborted" : "error",
       aborted ? "user_abort" : "turn_failed"
     );
-    if (!aborted)
+    if (!aborted) {
       await fail(errorCodeOf(error) ?? "infrastructure", String(error));
-    else outcome = { status: "aborted", errorCode: "cancelled" };
-    if (!aborted) logger.error("chat turn failed", { chatId: id, error });
+    } else {
+      outcome = { status: "aborted", errorCode: "cancelled" };
+    }
+    if (!aborted) {
+      logger.error("chat turn failed", { chatId: id, error });
+    }
     if (sessionManager) {
       if (!aborted) {
         ensureUserMessage(sessionManager, userText, previousUserCount);

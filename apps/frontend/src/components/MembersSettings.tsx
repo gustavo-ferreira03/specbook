@@ -89,8 +89,9 @@ export function MembersSettings() {
         method,
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-      if (await load())
+      if (await load()) {
         setFeedback({ type: "success", text: "Access updated." });
+      }
     } catch (reason) {
       setFeedback({ type: "error", text: errorMessage(reason) });
     } finally {

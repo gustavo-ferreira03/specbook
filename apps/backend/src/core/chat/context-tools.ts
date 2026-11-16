@@ -95,7 +95,9 @@ export function createApiDocumentationTool(
       const { url } = apiDocumentationSchema.parse(input);
       const selected = environment ?? (await resolveRunEnvironment(projectId));
       const project = await projectsRepository.getProject(projectId);
-      if (!project) return text("This project no longer exists.");
+      if (!project) {
+        return text("This project no longer exists.");
+      }
       const scrub = createProjectScrubber(projectId);
       try {
         const policy = await projectRunPolicy(
@@ -139,8 +141,9 @@ export function createChatResultsTool(projectId: string, chatId: string) {
       signal?.throwIfAborted();
       const { itemId } = parameters.parse(input);
       const chat = await chatsRepository.getChatRow(chatId);
-      if (!chat || chat.projectId !== projectId)
+      if (!chat || chat.projectId !== projectId) {
         return text("This conversation no longer exists in this project.");
+      }
       const { chatResults } = await import("./results");
       const results = await chatResults(chatId);
       const value = itemId
@@ -171,8 +174,9 @@ export function createContextTools(
       async execute() {
         const revision =
           await projectContextsRepository.getProjectContextRevision(revisionId);
-        if (!revision)
+        if (!revision) {
           return text("The discovery draft for this chat no longer exists.");
+        }
         return text(
           JSON.stringify({
             revisionId: revision.id,
@@ -200,8 +204,9 @@ export function createContextTools(
         }
         const revision =
           await projectContextsRepository.getProjectContextRevision(revisionId);
-        if (!revision)
+        if (!revision) {
           return text("The discovery draft for this chat no longer exists.");
+        }
         if (revision.status !== "draft") {
           return text(
             `This context revision is already ${revision.status} and can no longer be changed from this chat.`

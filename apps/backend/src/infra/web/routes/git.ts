@@ -42,7 +42,9 @@ export function createGitRouter(): Hono {
         project.id,
         repoGit.getRepoDir(project.id)
       );
-      if (checkoutMoved) await reindexProjectUnlocked(project.id);
+      if (checkoutMoved) {
+        await reindexProjectUnlocked(project.id);
+      }
       return (await issueGitAccessToken(project.id)).token;
     });
     return c.json({
@@ -65,13 +67,17 @@ export function createGitRouter(): Hono {
 
   router.get("/specs/:id/history", access("viewer"), async (c) => {
     const spec = await specsRepository.getSpec(c.req.param("id"));
-    if (!spec) throw new HTTPException(404, { message: "Spec not found" });
+    if (!spec) {
+      throw new HTTPException(404, { message: "Spec not found" });
+    }
     return c.json({ entries: await specHistory(spec) });
   });
 
   router.get("/specs/:id/history/:sha", access("viewer"), async (c) => {
     const spec = await specsRepository.getSpec(c.req.param("id"));
-    if (!spec) throw new HTTPException(404, { message: "Spec not found" });
+    if (!spec) {
+      throw new HTTPException(404, { message: "Spec not found" });
+    }
     return c.json(await specAtCommit(spec, c.req.param("sha")));
   });
 

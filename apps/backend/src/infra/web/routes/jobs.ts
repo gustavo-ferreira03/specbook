@@ -48,8 +48,9 @@ import { access } from "../access";
 
 async function projectJob(projectId: string, jobId: string) {
   const job = await jobsRepository.get(jobId);
-  if (!job || job.projectId !== projectId)
+  if (!job || job.projectId !== projectId) {
     throw new HTTPException(404, { message: "Job not found" });
+  }
   return job;
 }
 
@@ -59,8 +60,9 @@ async function projectItem(
   message = "Inbox item not found"
 ) {
   const item = await jobsRepository.item(itemId);
-  if (!item || item.projectId !== projectId)
+  if (!item || item.projectId !== projectId) {
     throw new HTTPException(404, { message });
+  }
   return item;
 }
 
@@ -71,9 +73,13 @@ async function sourceChatForItem(item: InboxItem): Promise<string | undefined> {
     payloadOf(item).sourceChatId,
     job?.sourceChatId,
   ]) {
-    if (typeof id !== "string") continue;
+    if (typeof id !== "string") {
+      continue;
+    }
     const chat = await chatsRepository.getChatRow(id);
-    if (chat?.projectId === item.projectId) return chat.id;
+    if (chat?.projectId === item.projectId) {
+      return chat.id;
+    }
   }
   return undefined;
 }
@@ -82,29 +88,34 @@ async function cancelJob(
   job: Job,
   classification?: Job["classification"]
 ): Promise<boolean> {
-  if (!ACTIVE_JOB_STATUSES.includes(job.status)) return false;
+  if (!ACTIVE_JOB_STATUSES.includes(job.status)) {
+    return false;
+  }
   await jobsRepository.update(job.id, {
     status: "cancelled",
     ...(classification ? { classification } : {}),
   });
-  if (isChatBusy(job.chatId))
+  if (isChatBusy(job.chatId)) {
     await Promise.allSettled([
       abortChatTurn(job.chatId),
       closeChatBrowser(job.chatId),
     ]);
+  }
   return true;
 }
 
 export function createJobsRouter(): Hono {
   const router = new Hono();
   router.get("/projects/:id/overview", access("viewer"), async (c) => {
-    if (!(await projectsRepository.getProject(c.req.param("id"))))
+    if (!(await projectsRepository.getProject(c.req.param("id")))) {
       throw new HTTPException(404, { message: "Project not found" });
+    }
     return c.json(await projectOverview(c.req.param("id")));
   });
   router.use("/projects/:id/jobs/*", async (c, next) => {
-    if (!(await projectsRepository.getProject(c.req.param("id")!)))
+    if (!(await projectsRepository.getProject(c.req.param("id")!))) {
       throw new HTTPException(404, { message: "Project not found" });
+    }
     await next();
   });
   router.get("/projects/:id/jobs", access("viewer"), async (c) =>
@@ -130,8 +141,9 @@ export function createJobsRouter(): Hono {
     access("editor"),
     async (c) => {
       const job = await projectJob(c.req.param("id"), c.req.param("jobId"));
-      if (!(await cancelJob(job)))
+      if (!(await cancelJob(job))) {
         throw new HTTPException(409, { message: "Job already stopped" });
+      }
       await jobsRepository.log(job.id, "cancelled", "Cancelled by human");
       return c.json({ ok: true });
     }
@@ -147,12 +159,14 @@ export function createJobsRouter(): Hono {
         !verification ||
         !verification.screenshots.includes(file) ||
         !isStepScreenshot(file)
-      )
+      ) {
         throw new HTTPException(404, { message: "Evidence not found" });
+      }
       const directory = proposalDirectory(item, verification.id);
       const target = path.join(directory, file);
-      if ((await fs.realpath(target)) !== target)
+      if ((await fs.realpath(target)) !== target) {
         throw new HTTPException(400, { message: "Invalid artifact path" });
+      }
       return c.body(new Uint8Array(await fs.readFile(target)), 200, {
         "Content-Type": stepScreenshotContentType(file),
         "Content-Security-Policy": "sandbox",
@@ -165,10 +179,11 @@ export function createJobsRouter(): Hono {
     access("editor"),
     async (c) => {
       const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
-      if (item.kind !== "bug_report")
+      if (item.kind !== "bug_report") {
         throw new HTTPException(400, {
           message: "Only bug reports can be promoted to regression coverage",
         });
+      }
       const intent = await enqueueIntent(
         item.projectId,
         {
@@ -231,7 +246,9 @@ ${item.body}`.slice(0, 6000),
     async (c) => {
       const item = await projectItem(c.req.param("id"), c.req.param("itemId"));
       const existing = await sourceChatForItem(item);
-      if (existing) return c.json({ chatId: existing });
+      if (existing) {
+        return c.json({ chatId: existing });
+      }
       const chat = await createChat(item.projectId, {}, chatTitle(item.title));
       await jobsRepository.updateItem(item.id, {
         payload: { ...item.payload, discussionChatId: chat.id },
@@ -252,18 +269,21 @@ ${item.body}`.slice(0, 6000),
       const { action, answer } = c.req.valid("json");
       const job = await jobsRepository.get(item.jobId);
       const proposal = ["spec_fix", "new_spec", "feature"].includes(item.kind);
-      if ((action === "approve" || action === "reject") && !proposal)
+      if ((action === "approve" || action === "reject") && !proposal) {
         throw new HTTPException(400, {
           message: "This item is not a proposal",
         });
-      if (action === "report_bug" && item.kind !== "spec_fix")
+      }
+      if (action === "report_bug" && item.kind !== "spec_fix") {
         throw new HTTPException(400, {
           message: "Only a suggested check update can be marked as an app bug",
         });
-      if (action === "answer" && (item.kind !== "question" || !answer))
+      }
+      if (action === "answer" && (item.kind !== "question" || !answer)) {
         throw new HTTPException(400, {
           message: "Provide an answer to a question",
         });
+      }
       if (
         action === "answer" &&
         (!job || job.status !== "blocked" || isChatBusy(job.chatId))
@@ -272,10 +292,11 @@ ${item.body}`.slice(0, 6000),
           message: "Wait for the job to pause before answering",
         });
       }
-      if (!(await jobsRepository.claimItem(item.id)))
+      if (!(await jobsRepository.claimItem(item.id))) {
         throw new HTTPException(409, {
           message: "This item has already been reviewed",
         });
+      }
       let commitSha: string | undefined;
       try {
         if (action === "approve") {
@@ -296,7 +317,7 @@ ${item.body}`.slice(0, 6000),
               other.kind === "bug_report" &&
               payloadOf(other).sourceItemId === item.id
           );
-          if (!existing)
+          if (!existing) {
             await jobsRepository.addItem({
               projectId: item.projectId,
               jobId: item.jobId,
@@ -311,14 +332,19 @@ ${item.body}`.slice(0, 6000),
                 language: "en",
               },
             });
+          }
           await jobsRepository.updateItem(item.id, { status: "rejected" });
-          if (job) await cancelJob(job, "application_bug");
+          if (job) {
+            await cancelJob(job, "application_bug");
+          }
         } else if (action === "ignore") {
           await jobsRepository.updateItem(item.id, {
             status: "dismissed",
             payload: { ...item.payload, ignoredCheck: true },
           });
-          if (job) await cancelJob(job);
+          if (job) {
+            await cancelJob(job);
+          }
         } else {
           await jobsRepository.updateItem(item.id, {
             status: action === "reject" ? "rejected" : "dismissed",
@@ -327,7 +353,7 @@ ${item.body}`.slice(0, 6000),
         await jobsRepository.log(item.jobId, `inbox:${action}`, item.id);
         return c.json({ item: await jobsRepository.item(item.id) });
       } catch (error) {
-        if (commitSha)
+        if (commitSha) {
           await jobsRepository
             .updateItem(item.id, { status: "approved", commitSha })
             .catch((cause) =>
@@ -336,7 +362,9 @@ ${item.body}`.slice(0, 6000),
                 cause,
               })
             );
-        else await jobsRepository.updateItem(item.id, { status: "pending" });
+        } else {
+          await jobsRepository.updateItem(item.id, { status: "pending" });
+        }
         throw new HTTPException(409, {
           message: error instanceof Error ? error.message : String(error),
         });

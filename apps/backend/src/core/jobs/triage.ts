@@ -40,13 +40,15 @@ export async function currentFailure(projectId: string, runId?: string) {
     run.flaky ||
     run.awaitingDeploy ||
     !["failed", "error"].includes(run.status)
-  )
+  ) {
     return null;
+  }
   if (
     (await runsRepository.listRuns(spec.id, { limit: 1 }))[0]?.id !== run.id ||
     !(await matchesCurrentSpec(run, spec))
-  )
+  ) {
     return null;
+  }
   return { run, spec };
 }
 
@@ -54,8 +56,9 @@ export async function cancelStaleTriage(job: Job): Promise<boolean> {
   if (
     job.kind !== "failure_triage" ||
     (await currentFailure(job.projectId, job.runId ?? undefined))
-  )
+  ) {
     return false;
+  }
   if (
     await jobsRepository.transition(job.id, job.status, "cancelled", {
       stopReason: "A newer run or Spec change superseded this failure.",
@@ -73,10 +76,11 @@ export async function cancelStaleTriage(job: Job): Promise<boolean> {
 
 export async function prepareTriageGoal(projectId: string, runId?: string) {
   const current = await currentFailure(projectId, runId);
-  if (!current)
+  if (!current) {
     throw new StaleTriageError(
       "The failed run is no longer the current result for this Spec and behavior contract"
     );
+  }
   const { run, spec } = current;
   const draft = !(await runsRepository.hasPassed(spec.id))
     ? "\nThis Spec has never passed, so its spec.ts is an unproven draft: a wrong locator, attribute or assumption about the app is test drift. Call it an app bug only after confirming the app contradicts spec.yml and the draft's own action order did not cause the result (for example, an element left selected or focused by a previous step receiving the next input). Also fix assertions on things the app never exposes, without changing what spec.yml expects."
@@ -105,8 +109,9 @@ export function createTriageTools(job: Job, abort: () => void) {
       async execute() {
         const run = job.runId ? await runsRepository.getRun(job.runId) : null;
         const spec = run ? await specsRepository.getSpec(run.specId) : null;
-        if (!run || spec?.projectId !== job.projectId)
+        if (!run || spec?.projectId !== job.projectId) {
           throw new Error("Failure evidence is no longer available");
+        }
         const directory = path.join(runsDir, run.id);
         const evidence = await readEvidenceManifest(directory);
         const evidenceReview = await reviewRunEvidence(directory, {
@@ -138,15 +143,18 @@ export function createTriageTools(job: Job, abort: () => void) {
                 .catch(() => null)
             )
           : []) {
-          if (!isStepScreenshot(step.file)) continue;
+          if (!isStepScreenshot(step.file)) {
+            continue;
+          }
           const file = path.join(directory, step.file);
           const bytes = await fs.readFile(file).catch(() => null);
-          if (bytes && bytes.byteLength <= 4 * 1024 * 1024)
+          if (bytes && bytes.byteLength <= 4 * 1024 * 1024) {
             content.push({
               type: "image",
               data: bytes.toString("base64"),
               mimeType: stepScreenshotContentType(step.file),
             });
+          }
         }
         return { content, details: undefined };
       },

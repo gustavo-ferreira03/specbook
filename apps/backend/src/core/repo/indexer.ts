@@ -79,7 +79,9 @@ async function isDirectory(target: string): Promise<boolean> {
   try {
     return (await fs.stat(target)).isDirectory();
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
     throw error;
   }
 }
@@ -94,14 +96,16 @@ async function readRepoEntry(
       unsafe: null,
     };
   } catch (error) {
-    if (error instanceof UnsafeRepoPathError)
+    if (error instanceof UnsafeRepoPathError) {
       return {
         content: null,
         unsafe: `${relative} is a symbolic link, which is not allowed`,
       };
+    }
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === "EISDIR" || code === "ELOOP")
+    if (code === "EISDIR" || code === "ELOOP") {
       return { content: null, unsafe: `${relative} is not a regular file` };
+    }
     throw error;
   }
 }
@@ -116,7 +120,9 @@ async function walk(
     withFileTypes: true,
   });
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
     const entryRelative = `${relative}/${entry.name}`;
     const specYaml = await readRepoEntry(root, specYamlFile(entryRelative));
     if (specYaml.content !== null || specYaml.unsafe !== null) {
@@ -157,10 +163,11 @@ async function planFeatures(
   for (const dir of [...dirs].sort()) {
     let doc: ReturnType<typeof parseFeatureYaml> | null = null;
     const yaml = await readRepoEntry(root, featureYamlFile(dir));
-    if (yaml.unsafe)
+    if (yaml.unsafe) {
       console.warn(
         `[specbook] ignoring ${dir}/feature.yml in project ${projectId}: ${yaml.unsafe}`
       );
+    }
     if (yaml.content !== null) {
       try {
         doc = parseFeatureYaml(yaml.content);
@@ -222,9 +229,13 @@ function planSpecs(
 
   for (const item of found) {
     const feature = featuresByPath.get(item.dirPath);
-    if (!feature) continue;
+    if (!feature) {
+      continue;
+    }
     const existing = specsByPath.get(item.path);
-    if (existing) claimed.add(existing.id);
+    if (existing) {
+      claimed.add(existing.id);
+    }
     planned.push({
       item,
       feature,
@@ -241,7 +252,9 @@ function planSpecs(
   }
 
   for (const entry of planned) {
-    if (entry.existing || !entry.sourceHash || !entry.markdownHash) continue;
+    if (entry.existing || !entry.sourceHash || !entry.markdownHash) {
+      continue;
+    }
     const moved = existingSpecs.find(
       (spec) =>
         !claimed.has(spec.id) &&
@@ -302,7 +315,9 @@ function planSpecs(
 
 function validatePlanned(planned: PlannedSpec[]): void {
   for (const entry of planned) {
-    if (!entry.needsValidation) continue;
+    if (!entry.needsValidation) {
+      continue;
+    }
     let validation: ReturnType<typeof validateSpec>;
     try {
       validation = validateSpec(entry.item.testSource ?? "", entry.humanSpec);
@@ -350,8 +365,9 @@ function specQuery(
   }
   const patch: SpecPatch = {};
   for (const key of Object.keys(values) as (keyof typeof values)[]) {
-    if (existing[key] !== values[key])
+    if (existing[key] !== values[key]) {
       Object.assign(patch, { [key]: values[key] });
+    }
   }
   return {
     id: existing.id,
@@ -366,8 +382,12 @@ async function planContext(
   root: string
 ): Promise<{ queries: DbQuery[]; syncError: string | null | undefined }> {
   const source = await readRepoEntry(root, "context.yml");
-  if (source.unsafe) return { queries: [], syncError: source.unsafe };
-  if (source.content === null) return { queries: [], syncError: undefined };
+  if (source.unsafe) {
+    return { queries: [], syncError: source.unsafe };
+  }
+  if (source.content === null) {
+    return { queries: [], syncError: undefined };
+  }
   let context: ProjectContext;
   try {
     context = parseContextYaml(source.content);
@@ -379,8 +399,9 @@ async function planContext(
   }
   const latest =
     await projectContextsRepository.getLatestConfirmedProjectContext(projectId);
-  if (latest && sameProjectContext(latest.context, context))
+  if (latest && sameProjectContext(latest.context, context)) {
     return { queries: [], syncError: null };
+  }
   const project = await projectsRepository.getProject(projectId);
   const brief = latest?.brief ?? {
     goal: "",
@@ -403,7 +424,9 @@ async function removeRunDirs(
   projectId: string,
   runIds: string[]
 ): Promise<void> {
-  if (runIds.length === 0) return;
+  if (runIds.length === 0) {
+    return;
+  }
   await repoGit.deleteRunCommitRefsUnlocked(projectId, runIds);
   await Promise.allSettled(
     runIds.map((runId) =>
@@ -462,7 +485,9 @@ export async function reindexProjectUnlocked(
   const specsRoot = await fs
     .lstat(path.join(root, "specs"))
     .catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return null;
+      if (error.code === "ENOENT") {
+        return null;
+      }
       throw error;
     });
   if (specsRoot?.isSymbolicLink()) {
@@ -470,7 +495,9 @@ export async function reindexProjectUnlocked(
       "The specs directory is a symbolic link, which is not allowed"
     );
   }
-  if (specsRoot?.isDirectory()) await walk(root, "specs", dirs, found);
+  if (specsRoot?.isDirectory()) {
+    await walk(root, "specs", dirs, found);
+  }
 
   const [existingFeatures, existingSpecs] = await Promise.all([
     featuresRepository.listFeatures(projectId),
@@ -491,9 +518,13 @@ export async function reindexProjectUnlocked(
   const invalidSpecs: string[] = [];
   for (const entry of planned) {
     const { id, query } = specQuery(projectId, entry);
-    if (query) queries.push(query);
+    if (query) {
+      queries.push(query);
+    }
     seenIds.add(id);
-    if (entry.status === "invalid") invalidSpecs.push(id);
+    if (entry.status === "invalid") {
+      invalidSpecs.push(id);
+    }
   }
 
   const unseenSpecs = existingSpecs.filter((spec) => !seenIds.has(spec.id));

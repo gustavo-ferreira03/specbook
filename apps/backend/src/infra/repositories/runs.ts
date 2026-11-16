@@ -69,7 +69,9 @@ class RunsRepository {
     let condition = eq(runs.specId, specId);
     if (options.before) {
       const cursor = await this.getRun(options.before);
-      if (!cursor || cursor.specId !== specId) return [];
+      if (!cursor || cursor.specId !== specId) {
+        return [];
+      }
       condition = and(
         condition,
         or(
@@ -100,7 +102,9 @@ class RunsRepository {
 
   async latestRuns(specIds: string[]): Promise<Map<string, Run>> {
     const latest = new Map<string, Run>();
-    if (specIds.length === 0) return latest;
+    if (specIds.length === 0) {
+      return latest;
+    }
     const newest = db
       .select({
         specId: runs.specId,
@@ -120,7 +124,9 @@ class RunsRepository {
           eq(runs.startedAt, newest.startedAt)
         )
       );
-    for (const { run } of rows) latest.set(run.specId, run);
+    for (const { run } of rows) {
+      latest.set(run.specId, run);
+    }
     return latest;
   }
 
@@ -170,7 +176,9 @@ class RunsRepository {
   }
 
   async hasRunningRuns(specIds: string[]): Promise<boolean> {
-    if (specIds.length === 0) return false;
+    if (specIds.length === 0) {
+      return false;
+    }
     const rows = await db
       .select({ id: runs.id })
       .from(runs)
@@ -189,14 +197,18 @@ class RunsRepository {
     const { pendingTunnelBatchRunIds } =
       await import("../../core/runner/batch");
     const pending = new Set<string>(await pendingTunnelBatchRunIds());
-    for (const id of await pendingRunnerRunIds()) pending.add(id);
+    for (const id of await pendingRunnerRunIds()) {
+      pending.add(id);
+    }
     const interrupted = (
       await db
         .select({ id: runs.id })
         .from(runs)
         .where(eq(runs.status, "running"))
     ).filter((row) => !pending.has(row.id));
-    if (!interrupted.length) return;
+    if (!interrupted.length) {
+      return;
+    }
     await db
       .update(runs)
       .set({

@@ -74,12 +74,15 @@ class EnvironmentsRepository {
     const row = (
       await db.select().from(environments).where(eq(environments.id, id))
     )[0];
-    if (!row) return;
+    if (!row) {
+      return;
+    }
     await repoGit.withRepoLock(row.projectId, async () => {
       await db.delete(environments).where(eq(environments.id, id));
       for (const spec of await specsRepository.listSpecs(row.projectId)) {
-        if (spec.status === "awaiting_deploy")
+        if (spec.status === "awaiting_deploy") {
           await specEnvironmentsRepository.refresh(spec);
+        }
       }
     });
   }

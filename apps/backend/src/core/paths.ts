@@ -8,7 +8,9 @@ function findBackendRoot(start: string): string {
   let current = start;
   while (!existsSync(path.join(current, "package.json"))) {
     const parent = path.dirname(current);
-    if (parent === current) return path.resolve(start, "..", "..");
+    if (parent === current) {
+      return path.resolve(start, "..", "..");
+    }
     current = parent;
   }
   return current;

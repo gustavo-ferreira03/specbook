@@ -33,7 +33,9 @@ export type TunnelEvent =
   | { event: "stopped"; url: string };
 
 async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return;
+  if (signal.aborted) {
+    return;
+  }
   await new Promise<void>((resolve) => {
     const done = () => {
       clearTimeout(timer);
@@ -42,7 +44,9 @@ async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
     };
     const timer = setTimeout(done, milliseconds);
     signal.addEventListener("abort", done, { once: true });
-    if (signal.aborted) done();
+    if (signal.aborted) {
+      done();
+    }
   });
 }
 
@@ -50,11 +54,12 @@ function requireAllowedOrigins(
   origins: string[],
   allowedOrigins: string[]
 ): void {
-  if (origins.some((origin) => !allowedOrigins.includes(origin)))
+  if (origins.some((origin) => !allowedOrigins.includes(origin))) {
     throw new RemoteError(
       "Tunnel configuration includes origins outside --allow-origin or SPECBOOK_TUNNEL_ALLOWED_ORIGINS",
       403
     );
+  }
 }
 
 function monitorConnection(websocket: WebSocket): void {
@@ -65,7 +70,9 @@ function monitorConnection(websocket: WebSocket): void {
   };
   websocket.on("pong", pong);
   const interval = setInterval(() => {
-    if (websocket.readyState !== WebSocket.OPEN || pongTimeout) return;
+    if (websocket.readyState !== WebSocket.OPEN || pongTimeout) {
+      return;
+    }
     pongTimeout = setTimeout(() => websocket.terminate(), 15_000);
     websocket.ping();
   }, 15_000);
@@ -180,8 +187,9 @@ async function connect(
         if (
           !config.origins.includes(origin) ||
           !allowedOrigins.includes(origin)
-        )
+        ) {
           throw new Error("Network target blocked");
+        }
         const target = httpTarget(origin);
         const address = await resolveTarget(target, true);
         return new Promise<net.Socket>((connected, refused) => {
@@ -207,7 +215,9 @@ async function connect(
       });
       resolve(websocket);
     });
-    if (signal.aborted) abort();
+    if (signal.aborted) {
+      abort();
+    }
   });
 }
 
@@ -216,20 +226,29 @@ export async function runTunnel(
   emit: (event: TunnelEvent) => Promise<void>
 ): Promise<void> {
   rememberToken(options.token);
-  if (!options.token || /\s/.test(options.token) || options.token.length > 4096)
+  if (
+    !options.token ||
+    /\s/.test(options.token) ||
+    options.token.length > 4096
+  ) {
     throw new Error(
       "Provide one tunnel token through SPECBOOK_RUNNER_TOKEN or the hidden prompt"
     );
-  if (!options.project)
+  }
+  if (!options.project) {
     throw new Error("SPECBOOK_PROJECT or --project is required");
+  }
   const allowedOrigins = [...new Set(options.allowedOrigins ?? [])];
-  if (!allowedOrigins.length)
+  if (!allowedOrigins.length) {
     throw new Error(
       "Configure --allow-origin or SPECBOOK_TUNNEL_ALLOWED_ORIGINS with the application origins this tunnel may access"
     );
+  }
   for (const origin of allowedOrigins) {
     try {
-      if (httpTarget(origin).origin !== origin) throw new Error();
+      if (httpTarget(origin).origin !== origin) {
+        throw new Error();
+      }
     } catch {
       throw new Error(
         "Tunnel allowed origins must be HTTP(S) origins without credentials, paths or fragments"
@@ -263,16 +282,18 @@ export async function runTunnel(
       }
       if (!response.ok) {
         await response.body?.cancel();
-        if ([401, 403, 409].includes(response.status))
+        if ([401, 403, 409].includes(response.status)) {
           throw new RemoteError(
             "Use a tunnel token restricted to this environment's group and project, and choose a tunnel environment",
             response.status
           );
-        if (response.status === 426)
+        }
+        if (response.status === 426) {
           throw new RemoteError(
             "Tunnel protocol is incompatible. Install the CLI from this server and restart the tunnel.",
             426
           );
+        }
         throw new Error("Specbook could not prepare the tunnel; retrying");
       }
       const config = tunnelConfigSchema.parse(await response.json());
@@ -297,24 +318,30 @@ export async function runTunnel(
           return;
         }
         websocket.once("close", (code) => {
-          if (signal.aborted) resolve();
-          else if (code === 1008)
+          if (signal.aborted) {
+            resolve();
+          } else if (code === 1008) {
             reject(
               new RemoteError(
                 "Tunnel token or environment origins changed. Check Settings → Runners and restart the tunnel.",
                 403
               )
             );
-          else reject(new Error("Tunnel disconnected"));
+          } else {
+            reject(new Error("Tunnel disconnected"));
+          }
         });
       });
     } catch (error) {
-      if (signal.aborted) break;
+      if (signal.aborted) {
+        break;
+      }
       if (
         error instanceof RemoteError &&
         [401, 403, 426].includes(error.status)
-      )
+      ) {
         throw error;
+      }
       const reason =
         error instanceof RemoteError && error.status === 409
           ? "Another tunnel is already connected to this environment; retrying"

@@ -41,15 +41,18 @@ export function EnvironmentSelect({
         setEnvironments(result.environments);
       })
       .catch((caught) => {
-        if (!isAbortError(caught)) setError(errorMessage(caught));
+        if (!isAbortError(caught)) {
+          setError(errorMessage(caught));
+        }
       });
     return () => controller.abort();
   }, [projectId, retryKey]);
   useEffect(
     () =>
       onInvalidate((event) => {
-        if (matchesInvalidation(event, "projects", projectId))
+        if (matchesInvalidation(event, "projects", projectId)) {
           setRetryKey((key) => key + 1);
+        }
       }),
     [projectId]
   );
@@ -58,10 +61,13 @@ export function EnvironmentSelect({
     if (
       loaded &&
       !environments.some((environment) => environment.name === value)
-    )
+    ) {
       onValueChange("Production");
+    }
   }, [loaded, environments, value, onValueChange]);
-  if (!error && environments.length <= 1) return null;
+  if (!error && environments.length <= 1) {
+    return null;
+  }
   return (
     <div className={cn("min-w-0", className)}>
       <label htmlFor={id} className="sr-only">

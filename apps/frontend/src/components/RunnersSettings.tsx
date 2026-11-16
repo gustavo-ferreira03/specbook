@@ -82,7 +82,7 @@ interface Runner {
 }
 
 function RunnerProcesses({ runner }: { runner: Runner }) {
-  if (!runner.instances.length)
+  if (!runner.instances.length) {
     return (
       <p className="text-meta text-ink-muted mt-1 flex flex-wrap gap-x-3 gap-y-1">
         {runner.cliVersion ? (
@@ -109,6 +109,7 @@ function RunnerProcesses({ runner }: { runner: Runner }) {
         )}
       </p>
     );
+  }
   return (
     <ul
       className="mt-2 space-y-2"
@@ -196,18 +197,24 @@ export function RunnersSettings() {
           signal: controller.signal,
         }),
       ]);
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        return;
+      }
       const [runnerResult, queueResult] = results;
-      if (runnerResult.status === "fulfilled")
+      if (runnerResult.status === "fulfilled") {
         setRunners(runnerResult.value.runners);
-      else if (!isAbortError(runnerResult.reason))
+      } else if (!isAbortError(runnerResult.reason)) {
         setFeedback({ type: "error", text: errorMessage(runnerResult.reason) });
+      }
       if (queueResult.status === "fulfilled") {
         setQueues(queueResult.value.queues);
         setQueueError("");
-      } else if (!isAbortError(queueResult.reason))
+      } else if (!isAbortError(queueResult.reason)) {
         setQueueError(errorMessage(queueResult.reason));
-      if (!controller.signal.aborted) timer = setTimeout(load, 5000);
+      }
+      if (!controller.signal.aborted) {
+        timer = setTimeout(load, 5000);
+      }
     }
     void load();
     return () => {
@@ -224,7 +231,9 @@ export function RunnersSettings() {
         setProjectsError("");
       })
       .catch((reason) => {
-        if (!isAbortError(reason)) setProjectsError(errorMessage(reason));
+        if (!isAbortError(reason)) {
+          setProjectsError(errorMessage(reason));
+        }
       });
     return () => controller.abort();
   }, [retry]);
@@ -267,7 +276,9 @@ export function RunnersSettings() {
   }
 
   async function copy() {
-    if (!secret) return;
+    if (!secret) {
+      return;
+    }
     if (await copyText(secret.value)) {
       setCopied(true);
       setCopyError(false);
@@ -279,7 +290,9 @@ export function RunnersSettings() {
   }
 
   async function revokeToken() {
-    if (!revoke) return;
+    if (!revoke) {
+      return;
+    }
     setBusy(true);
     setRevokeError("");
     try {
@@ -287,8 +300,12 @@ export function RunnersSettings() {
       setRunners(
         (current) => current?.filter((runner) => runner.id !== revoke.id) ?? []
       );
-      if (secret?.id === revoke.id) setSecret(null);
-      if (rotate?.id === revoke.id) setRotate(null);
+      if (secret?.id === revoke.id) {
+        setSecret(null);
+      }
+      if (rotate?.id === revoke.id) {
+        setRotate(null);
+      }
       setRevoke(null);
       setFeedback({ type: "success", text: "Token revoked." });
     } catch (reason) {
@@ -299,7 +316,9 @@ export function RunnersSettings() {
   }
 
   async function rotateToken() {
-    if (!rotate) return;
+    if (!rotate) {
+      return;
+    }
     setBusy(true);
     setRotateError("");
     setCopied(false);
@@ -335,7 +354,9 @@ export function RunnersSettings() {
   }
 
   function projectNames(ids: string[]): string {
-    if (!projects) return countLabel(ids.length, "selected project");
+    if (!projects) {
+      return countLabel(ids.length, "selected project");
+    }
     return ids
       .map(
         (id) =>

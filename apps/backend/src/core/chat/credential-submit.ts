@@ -45,9 +45,10 @@ export async function submitChatCredentials(
         field.sensitive ??
         !(pending.kind === "login" && field.key === "username"),
     }));
-  for (const input of inputs)
+  for (const input of inputs) {
     if (input.sensitive && input.value)
       registerTransientSecret(pending.projectId, input.value);
+  }
   if (inputs.some((input) => input.value === "")) {
     throw new HTTPException(400, { message: "Fill every requested field." });
   }
@@ -80,14 +81,15 @@ export async function submitChatCredentials(
     const allowedOrigins = [
       ...new Set([...(existing?.allowedOrigins ?? []), pending.origin]),
     ];
-    if (existing)
+    if (existing) {
       await updateProfile(existing, { allowedOrigins, fields: inputs });
-    else
+    } else {
       await createProfile(pending.projectId, {
         name: pending.profileName,
         allowedOrigins,
         fields: inputs,
       });
+    }
     resolveCredentialRequest(chatId, requestId, "saved");
     return { ok: true };
   }

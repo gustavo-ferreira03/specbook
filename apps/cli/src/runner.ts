@@ -76,7 +76,9 @@ export type RunnerEvent =
     };
 
 async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return;
+  if (signal.aborted) {
+    return;
+  }
   await new Promise<void>((resolve) => {
     const done = () => {
       clearTimeout(timer);
@@ -85,7 +87,9 @@ async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
     };
     const timer = setTimeout(done, milliseconds);
     signal.addEventListener("abort", done, { once: true });
-    if (signal.aborted) done();
+    if (signal.aborted) {
+      done();
+    }
   });
 }
 
@@ -96,26 +100,33 @@ async function artifacts(
   const root = await fs.realpath(directory);
   const evidenceDirectory = path.join(directory, "evidence");
   const evidenceRoot = await fs.realpath(evidenceDirectory).catch(() => null);
-  if (evidenceRoot !== null && evidenceRoot !== path.join(root, "evidence"))
+  if (evidenceRoot !== null && evidenceRoot !== path.join(root, "evidence")) {
     throw new CodedError("infrastructure", "Invalid runner evidence directory");
+  }
   const files = ["spec.ts", "spec.yml", "evidence.json"];
   for (const file of await fs
     .readdir(evidenceDirectory)
-    .catch(() => [] as string[]))
+    .catch(() => [] as string[])) {
     files.push(`evidence/${file}`);
+  }
   const result: RunnerCompletion["results"][number]["artifacts"] = [];
   let replayBytes: number | null = null;
   let replayUnavailable: string | undefined;
   for (const file of files) {
-    if (!runnerArtifactPathSchema.safeParse(file).success) continue;
+    if (!runnerArtifactPathSchema.safeParse(file).success) {
+      continue;
+    }
     const full = path.join(directory, file);
     const stat = await fs.lstat(full).catch(() => null);
-    if (!stat?.isFile() || stat.isSymbolicLink()) continue;
-    if (stat.size > 32 * 1024 * 1024)
+    if (!stat?.isFile() || stat.isSymbolicLink()) {
+      continue;
+    }
+    if (stat.size > 32 * 1024 * 1024) {
       throw new CodedError(
         "infrastructure",
         "Runner evidence file exceeds 32 MB"
       );
+    }
     let data: Buffer = await fs.readFile(full);
     if (file === REPLAY_FILE) {
       const events = await decodeReplay(data);
@@ -168,7 +179,9 @@ function withoutVideo(completion: RunnerCompletion): RunnerCompletion {
       artifacts: result.artifacts
         .filter((artifact) => artifact.path !== "evidence/execution.webm")
         .map((artifact) => {
-          if (artifact.path !== "evidence.json") return artifact;
+          if (artifact.path !== "evidence.json") {
+            return artifact;
+          }
           try {
             const evidence = JSON.parse(
               Buffer.from(artifact.content, "base64").toString("utf8")
@@ -195,11 +208,15 @@ function withoutReplay(completion: RunnerCompletion): RunnerCompletion {
       artifacts: result.artifacts
         .filter((artifact) => artifact.path !== REPLAY_FILE)
         .map((artifact) => {
-          if (artifact.path !== "evidence.json") return artifact;
+          if (artifact.path !== "evidence.json") {
+            return artifact;
+          }
           const evidence = JSON.parse(
             Buffer.from(artifact.content, "base64").toString("utf8")
           );
-          if (!evidence.replay) return artifact;
+          if (!evidence.replay) {
+            return artifact;
+          }
           return {
             ...artifact,
             content: Buffer.from(
@@ -256,18 +273,20 @@ async function execute(
       const outputDir = path.join(directory, spec.runId);
       await fs.mkdir(outputDir, { mode: 0o700 });
       const analyzed = analyzeSpecSource(spec.files["spec.ts"]);
-      if (!analyzed.ok)
+      if (!analyzed.ok) {
         throw new CodedError(
           "invalid_spec",
           `Spec "${spec.title}" is invalid: ${analyzed.error}`
         );
+      }
       const humanSpec = parseSpecYaml(spec.files["spec.yml"]).humanSpec;
       const titlesError = stepTitlesError(analyzed.analysis.steps, humanSpec);
-      if (titlesError)
+      if (titlesError) {
         throw new CodedError(
           "invalid_spec",
           `Spec "${spec.title}" is invalid: ${titlesError}`
         );
+      }
       selected.push({
         key: spec.runId,
         source: spec.files["spec.ts"],
@@ -298,11 +317,12 @@ async function execute(
       );
     }
     const target = httpTarget(lease.work.baseUrl);
-    if (!lease.work.networkPolicy.origins.includes(target.origin))
+    if (!lease.work.networkPolicy.origins.includes(target.origin)) {
       throw new CodedError(
         "environment",
         "The run base URL is outside the environment's network policy"
       );
+    }
     await resolveTarget(target, lease.work.networkPolicy.allowPrivate);
     await ensureChromium(signal);
     signal.throwIfAborted();
@@ -335,7 +355,9 @@ async function execute(
       });
     }
   } catch (error) {
-    if (signal.aborted) throw signal.reason;
+    if (signal.aborted) {
+      throw signal.reason;
+    }
     let reason = error instanceof Error ? error.message : String(error);
     try {
       reason = safeText(await scrub(reason));
@@ -380,28 +402,38 @@ export async function runRunner(
   emit: (event: RunnerEvent) => Promise<void>
 ): Promise<void> {
   rememberToken(options.token);
-  if (!options.token || /\s/.test(options.token) || options.token.length > 4096)
+  if (
+    !options.token ||
+    /\s/.test(options.token) ||
+    options.token.length > 4096
+  ) {
     throw new Error(
       "Provide one runner token through SPECBOOK_RUNNER_TOKEN or the hidden prompt"
     );
+  }
   const concurrency = options.concurrency ?? 1;
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32)
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32) {
     throw new Error("Use --concurrency between 1 and 32");
-  if (options.once && options.drainAfter !== undefined)
+  }
+  if (options.once && options.drainAfter !== undefined) {
     throw new Error("Use --once or --drain-after, not both");
+  }
   const limit = options.once ? 1 : options.drainAfter;
-  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1))
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) {
     throw new Error("Use a positive integer for --drain-after");
+  }
   const allowedOrigins = [...new Set(options.allowedOrigins ?? [])];
-  if (!allowedOrigins.length)
+  if (!allowedOrigins.length) {
     throw new Error(
       "Configure --allow-origin or SPECBOOK_RUNNER_ALLOWED_ORIGINS with the application origins this runner may access"
     );
+  }
   for (const origin of allowedOrigins) {
-    if (httpTarget(origin).origin !== origin)
+    if (httpTarget(origin).origin !== origin) {
       throw new Error(
         "Runner allowed origins must be HTTP(S) origins without credentials, paths, query or fragment"
       );
+    }
   }
   let api = normalizeServerUrl(options.url);
   const stop = new AbortController();
@@ -438,7 +470,9 @@ export async function runRunner(
           signal: AbortSignal.any([requestSignal, AbortSignal.timeout(35_000)]),
         });
       } catch {
-        if (requestSignal.aborted) throw requestSignal.reason;
+        if (requestSignal.aborted) {
+          throw requestSignal.reason;
+        }
         throw new Error(
           "Could not reach Specbook; check the server URL and connection"
         );
@@ -454,7 +488,9 @@ export async function runRunner(
     ) {
       await response.body?.cancel();
       response = await fetchAt(`${api}/api`);
-      if (response.ok) api = `${api}/api`;
+      if (response.ok) {
+        api = `${api}/api`;
+      }
     }
     if (!response.ok) {
       let error: unknown;
@@ -487,15 +523,17 @@ export async function runRunner(
       throw new Error("Specbook returned an invalid runner response");
     }
     const result = schema.safeParse(parsed);
-    if (!result.success)
+    if (!result.success) {
       throw new Error(
         "Specbook returned an unexpected runner response; check that CLI and server versions match"
       );
+    }
     return result.data;
   };
   const retry = async (error: unknown, currentSignal: AbortSignal) => {
-    if (error instanceof RemoteError && [401, 403].includes(error.status))
+    if (error instanceof RemoteError && [401, 403].includes(error.status)) {
       throw error;
+    }
     if (Date.now() - retryNotice >= 5000) {
       retryNotice = Date.now();
       await emit({
@@ -545,7 +583,9 @@ export async function runRunner(
           Math.min(wait, Math.max(1, expires - Date.now())),
           heartbeatSignal
         );
-        if (heartbeatSignal.aborted) return;
+        if (heartbeatSignal.aborted) {
+          return;
+        }
         try {
           const response = await jsonResponse(
             await send(
@@ -564,7 +604,9 @@ export async function runRunner(
           expires = Date.parse(response.leaseExpiresAt);
           wait = lease.heartbeatMs;
         } catch (error) {
-          if (heartbeatSignal.aborted) return;
+          if (heartbeatSignal.aborted) {
+            return;
+          }
           if (
             (error instanceof RemoteError && error.status < 500) ||
             Date.now() >= expires
@@ -614,8 +656,9 @@ export async function runRunner(
           await response.body?.cancel();
           completed = true;
           completedJobs++;
-          if (completion.results.some((result) => result.status !== "passed"))
+          if (completion.results.some((result) => result.status !== "passed")) {
             failedJobs++;
+          }
           await emit({
             event: "completed",
             jobId: lease.jobId,
@@ -626,7 +669,9 @@ export async function runRunner(
           });
           break;
         } catch (error) {
-          if (jobSignal.aborted) break;
+          if (jobSignal.aborted) {
+            break;
+          }
           if (
             error instanceof RemoteError &&
             error.status === 413 &&
@@ -678,7 +723,9 @@ export async function runRunner(
         }
       }
     } catch (error) {
-      if (!jobSignal.aborted) throw error;
+      if (!jobSignal.aborted) {
+        throw error;
+      }
     } finally {
       heartbeatStop.abort();
       await heartbeat;
@@ -697,18 +744,22 @@ export async function runRunner(
     if (
       heartbeatError instanceof RemoteError &&
       [401, 403].includes(heartbeatError.status)
-    )
+    ) {
       throw heartbeatError;
-    if (heartbeatError && !signal.aborted)
+    }
+    if (heartbeatError && !signal.aborted) {
       await emit({
         event: "retrying",
         reason: "Runner lease was lost; waiting for re-queued work",
         retryInMs: 0,
       });
+    }
   };
   const worker = async () => {
     while (!signal.aborted) {
-      if (limit !== undefined && startedJobs >= limit) break;
+      if (limit !== undefined && startedJobs >= limit) {
+        break;
+      }
       // Reserve a slot before polling so concurrent workers cannot exceed the drain limit.
       if (limit !== undefined && startedJobs + claimingJobs >= limit) {
         await delay(100, signal);
@@ -731,9 +782,13 @@ export async function runRunner(
           ),
           runnerClaimResponseSchema
         );
-        if (claimed.lease) startedJobs++;
+        if (claimed.lease) {
+          startedJobs++;
+        }
       } catch (error) {
-        if (signal.aborted) break;
+        if (signal.aborted) {
+          break;
+        }
         await retry(error, signal);
         continue;
       } finally {
@@ -750,7 +805,7 @@ export async function runRunner(
           });
         }
         if (signal.aborted) {
-          if (claimed.lease)
+          if (claimed.lease) {
             await send(
               `/runner/jobs/${claimed.lease.jobId}/release`,
               { leaseId: claimed.lease.leaseId },
@@ -758,12 +813,18 @@ export async function runRunner(
             )
               .then((response) => response.body?.cancel())
               .catch(() => undefined);
+          }
           break;
         }
-        if (claimed.lease) await work(claimed.lease);
-        else await delay(100, signal);
+        if (claimed.lease) {
+          await work(claimed.lease);
+        } else {
+          await delay(100, signal);
+        }
       } catch (error) {
-        if (signal.aborted) break;
+        if (signal.aborted) {
+          break;
+        }
         await retry(error, signal);
       }
     }
@@ -784,6 +845,8 @@ export async function runRunner(
   ).catch(() => null);
   await disconnected?.body?.cancel();
   const failed = settled.find((result) => result.status === "rejected");
-  if (failed?.status === "rejected") throw failed.reason;
+  if (failed?.status === "rejected") {
+    throw failed.reason;
+  }
   await emit({ event: "stopped", url: api, completedJobs, failedJobs });
 }

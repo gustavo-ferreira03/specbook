@@ -47,7 +47,9 @@ const SAVED_STYLE = "data-specbook-evidence-style";
 async function addMasks(mask: Locator, deadline: number): Promise<void> {
   await mask.evaluateAll(
     (elements, { deadline, saved }) => {
-      if (Date.now() > deadline) throw new Error("Browser evidence timed out");
+      if (Date.now() > deadline) {
+        throw new Error("Browser evidence timed out");
+      }
       for (const element of elements as HTMLElement[]) {
         element.setAttribute(
           saved,
@@ -74,7 +76,7 @@ async function removeMasks(
             .evaluate(
               ({ marker, attribute, saved }) => {
                 const roots: (Document | ShadowRoot)[] = [document];
-                for (const root of roots)
+                for (const root of roots) {
                   for (const element of root.querySelectorAll("*")) {
                     if (element.shadowRoot) roots.push(element.shadowRoot);
                     if (
@@ -90,6 +92,7 @@ async function removeMasks(
                     }
                     element.removeAttribute(attribute);
                   }
+                }
               },
               { marker, attribute, saved: SAVED_STYLE }
             )
@@ -111,7 +114,7 @@ export async function captureStepScreenshot(
   const deadline = Date.now() + 5000;
   const textMasks: JSHandle<{ node: Text; value: string }[]>[] = [];
   try {
-    if (secrets.length)
+    if (secrets.length) {
       await withEvidenceTimeout(
         () =>
           Promise.all(
@@ -154,6 +157,7 @@ export async function captureStepScreenshot(
           ).then(() => undefined),
         remaining(deadline)
       );
+    }
     const masks = await withEvidenceTimeout(
       () =>
         Promise.all(
@@ -166,7 +170,7 @@ export async function captureStepScreenshot(
                 sensitive: boolean;
                 value: string;
               }[] = [];
-              for (const root of roots)
+              for (const root of roots) {
                 for (const element of root.querySelectorAll("*")) {
                   if (element.shadowRoot) roots.push(element.shadowRoot);
                   if (
@@ -186,6 +190,7 @@ export async function captureStepScreenshot(
                     value: element.value,
                   });
                 }
+              }
               return { elements, candidates };
             });
             try {
@@ -201,12 +206,15 @@ export async function captureStepScreenshot(
                 .map((candidate) => candidate.index);
               await state.evaluate(
                 ({ elements }, { indices, attribute, marker, deadline }) => {
-                  if (Date.now() > deadline) return;
-                  for (const index of indices)
+                  if (Date.now() > deadline) {
+                    return;
+                  }
+                  for (const index of indices) {
                     elements[index].setAttribute(
                       attribute,
                       `${marker}-${index}`
                     );
+                  }
                 },
                 { indices, attribute, marker, deadline }
               );
@@ -251,8 +259,9 @@ export async function captureStepScreenshot(
           textMasks.map(async (saved) => {
             await saved
               .evaluate((items) => {
-                for (const { node, value } of items)
+                for (const { node, value } of items) {
                   if (node.isConnected) node.data = value;
+                }
               })
               .catch(() => undefined);
             await saved.dispose().catch(() => undefined);

@@ -26,8 +26,9 @@ export function useRunnerEnvironment(projectId: string): boolean {
   useEffect(
     () =>
       onInvalidate((event) => {
-        if (matchesInvalidation(event, "projects", projectId))
+        if (matchesInvalidation(event, "projects", projectId)) {
           setRevision((value) => value + 1);
+        }
       }),
     [projectId]
   );

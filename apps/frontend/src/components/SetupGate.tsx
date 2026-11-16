@@ -22,7 +22,9 @@ export function SetupGate({ children }: { children: React.ReactNode }) {
     pathname === "/setup" || pathname === "/login" || pathname === "/join";
 
   useEffect(() => {
-    if (setupRoute || loading) return;
+    if (setupRoute || loading) {
+      return;
+    }
     const controller = new AbortController();
     setError("");
     void api<SetupStatus>("/setup/status", { signal: controller.signal })
@@ -38,16 +40,22 @@ export function SetupGate({ children }: { children: React.ReactNode }) {
           router.replace(
             `/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`
           );
-        } else setAllowed(true);
+        } else {
+          setAllowed(true);
+        }
       })
       .catch((reason) => {
-        if (!isAbortError(reason)) setError(errorMessage(reason));
+        if (!isAbortError(reason)) {
+          setError(errorMessage(reason));
+        }
       });
     return () => controller.abort();
   }, [attempt, pathname, router, setupRoute, loading, user, isAdmin]);
 
-  if (setupRoute || (allowed && user)) return children;
-  if (error)
+  if (setupRoute || (allowed && user)) {
+    return children;
+  }
+  if (error) {
     return (
       <main className="bg-surface min-h-dvh">
         <EmptyState
@@ -64,6 +72,7 @@ export function SetupGate({ children }: { children: React.ReactNode }) {
         />
       </main>
     );
+  }
   return (
     <main
       className="bg-surface min-h-dvh px-4 py-8"

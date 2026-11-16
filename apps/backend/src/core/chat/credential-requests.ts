@@ -66,7 +66,9 @@ export function resolveCredentialRequest(
   outcome: Outcome
 ): boolean {
   const entry = pendingByChat.get(chatId);
-  if (!entry || entry.request.id !== requestId) return false;
+  if (!entry || entry.request.id !== requestId) {
+    return false;
+  }
   pendingByChat.delete(chatId);
   entry.resolve(outcome);
   return true;
@@ -78,7 +80,9 @@ export async function waitForCredentialRequest(
   timeoutMs: number
 ): Promise<Outcome | "timeout"> {
   const entry = pendingByChat.get(chatId);
-  if (!entry || entry.request.id !== requestId) return "dismissed";
+  if (!entry || entry.request.id !== requestId) {
+    return "dismissed";
+  }
   let timer: NodeJS.Timeout;
   const timeout = new Promise<"timeout">((res) => {
     timer = setTimeout(() => res("timeout"), timeoutMs);

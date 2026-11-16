@@ -51,10 +51,12 @@ import {
 const attempts = new Map<string, { count: number; resets: number }>();
 function attempt(key: string): { count: number; resets: number } {
   const now = Date.now();
-  for (const [entry, value] of attempts)
+  for (const [entry, value] of attempts) {
     if (value.resets <= now) attempts.delete(entry);
-  while (attempts.size >= 10_000)
+  }
+  while (attempts.size >= 10_000) {
     attempts.delete(attempts.keys().next().value!);
+  }
   const entry = attempts.get(key) ?? { count: 0, resets: now + 60_000 };
   attempts.set(key, entry);
   return entry;
@@ -66,7 +68,9 @@ const tooMany = () =>
 function limit(key: string, maximum = 10): void {
   const entry = attempt(key);
   entry.count++;
-  if (entry.count > maximum) throw tooMany();
+  if (entry.count > maximum) {
+    throw tooMany();
+  }
 }
 
 const actor = (user: User) => ({
@@ -136,20 +140,22 @@ export function createAccountsRouter(): Hono {
     access("viewer"),
     zValidator("json", accessTokenSchema),
     async (c) => {
-      if (c.get("authentication") !== "session")
+      if (c.get("authentication") !== "session") {
         throw new HTTPException(403, {
           message: "Sign in to the web app to create access tokens.",
         });
+      }
       const user = requireRole(c, "viewer");
       const token = `sb_pat_${randomToken()}`;
       const { name, expiresAt } = c.req.valid("json");
       const accessToken = await withAccountsLock(async () => {
         const session = await sessionFromHeaders(c.req.raw.headers);
-        if (!session || session.user.id !== user.id)
+        if (!session || session.user.id !== user.id) {
           throw new HTTPException(401, {
             message:
               "Your session was revoked. Sign in again before creating a token.",
           });
+        }
         return accountsRepository.createAccessToken(
           user.id,
           name,
@@ -166,18 +172,20 @@ export function createAccountsRouter(): Hono {
     }
   );
   router.delete("/auth/access-tokens/:id", access("viewer"), async (c) => {
-    if (c.get("authentication") !== "session")
+    if (c.get("authentication") !== "session") {
       throw new HTTPException(403, {
         message: "Sign in to the web app to revoke access tokens.",
       });
+    }
     const id = c.req.param("id");
     if (
       !(await accountsRepository.revokeAccessToken(
         requireRole(c, "viewer").id,
         id
       ))
-    )
+    ) {
       throw new HTTPException(404, { message: "Access token not found." });
+    }
     await recordAudit("auth.access_token.revoked", { id });
     return c.json({ ok: true });
   });
@@ -188,19 +196,21 @@ export function createAccountsRouter(): Hono {
     zValidator("json", adminSchema),
     async (c) => {
       limit("bootstrap", 5);
-      if (await accountsRepository.hasUsers())
+      if (await accountsRepository.hasUsers()) {
         throw new HTTPException(409, {
           message: "An administrator already exists. Sign in to continue.",
         });
+      }
       const input = c.req.valid("json");
       const user = await accountsRepository.bootstrap({
         ...input,
         passwordHash: await passwordHash(input.password),
       });
-      if (!user)
+      if (!user) {
         throw new HTTPException(409, {
           message: "An administrator already exists. Sign in to continue.",
         });
+      }
       await startSession(c, user);
       await recordAudit("auth.admin.created", {}, undefined, actor(user));
       return c.json({ user: publicUser(user) }, 201);
@@ -215,11 +225,14 @@ export function createAccountsRouter(): Hono {
       const { email, password } = c.req.valid("json");
       // Only failed passwords count, so repeated valid sign-ins (CI, scripted checks) are never locked out.
       const failures = attempt(`login:${tokenHash(email)}`);
-      if (failures.count >= 10) throw tooMany();
-      if (!(await accountsRepository.getSso()).passwordLoginEnabled)
+      if (failures.count >= 10) {
+        throw tooMany();
+      }
+      if (!(await accountsRepository.getSso()).passwordLoginEnabled) {
         throw new HTTPException(403, {
           message: "Password sign-in is disabled. Use single sign-on.",
         });
+      }
       const user = await accountsRepository.userByEmail(email);
       let valid = false;
       try {
@@ -243,10 +256,11 @@ export function createAccountsRouter(): Hono {
           !latest ||
           latest.disabledAt ||
           !(await accountsRepository.getSso()).passwordLoginEnabled
-        )
+        ) {
           throw new HTTPException(401, {
             message: "Sign-in is no longer available for this account.",
           });
+        }
         await startSession(c, latest);
         return latest;
       });
@@ -280,20 +294,22 @@ export function createAccountsRouter(): Hono {
     access("admin"),
     zValidator("json", invitationSchema),
     async (c) => {
-      if (!(await accountsRepository.getSso()).passwordLoginEnabled)
+      if (!(await accountsRepository.getSso()).passwordLoginEnabled) {
         throw new HTTPException(409, {
           message:
             "Password invitations are disabled. New members can use single sign-on; you can then change their role in Members.",
         });
+      }
       const input = c.req.valid("json");
       const user = requireRole(c, "admin");
       const token = randomToken();
       const invitation = await withAccountsLock(async () => {
-        if (await accountsRepository.userByEmail(input.email))
+        if (await accountsRepository.userByEmail(input.email)) {
           throw new HTTPException(409, {
             message:
               "This email already has an account. Change its role in Members.",
           });
+        }
         return accountsRepository.createInvitation({
           ...input,
           tokenHash: tokenHash(token),
@@ -321,16 +337,18 @@ export function createAccountsRouter(): Hono {
     async (c) => {
       const updated = await withAccountsLock(async () => {
         const user = await accountsRepository.getUser(c.req.param("id"));
-        if (!user)
+        if (!user) {
           throw new HTTPException(404, { message: "Account not found." });
+        }
         const next = await accountsRepository.changeMember(
           user.id,
           c.req.valid("json")
         );
-        if (!next)
+        if (!next) {
           throw new HTTPException(409, {
             message: "Keep at least one active administrator who can sign in.",
           });
+        }
         await revokeUserSessions(user.id);
         return next;
       });
@@ -347,11 +365,12 @@ export function createAccountsRouter(): Hono {
       const invitation = await accountsRepository.invitation(
         tokenHash(c.req.valid("json").token)
       );
-      if (!invitation)
+      if (!invitation) {
         throw new HTTPException(410, {
           message:
             "This invitation expired or has already been used. Ask an administrator for a new link.",
         });
+      }
       return c.json(publicInvitation(invitation));
     }
   );
@@ -361,38 +380,43 @@ export function createAccountsRouter(): Hono {
     zValidator("json", acceptInvitationSchema),
     async (c) => {
       limit("invite-accept", 30);
-      if (!(await accountsRepository.getSso()).passwordLoginEnabled)
+      if (!(await accountsRepository.getSso()).passwordLoginEnabled) {
         throw new HTTPException(403, {
           message:
             "Password sign-up is disabled. Use single sign-on or ask an administrator for help.",
         });
+      }
       const input = c.req.valid("json");
       const hash = await passwordHash(input.password);
       const user = await withAccountsLock(async () => {
-        if (!(await accountsRepository.getSso()).passwordLoginEnabled)
+        if (!(await accountsRepository.getSso()).passwordLoginEnabled) {
           throw new HTTPException(403, {
             message:
               "Password sign-up is disabled. Use single sign-on or ask an administrator for help.",
           });
+        }
         const invitation = await accountsRepository.invitation(
           tokenHash(input.token)
         );
-        if (!invitation)
+        if (!invitation) {
           throw new HTTPException(410, {
             message: "This invitation expired or has already been used.",
           });
-        if (await accountsRepository.userByEmail(invitation.email))
+        }
+        if (await accountsRepository.userByEmail(invitation.email)) {
           throw new HTTPException(409, {
             message: "This email already has an account. Sign in instead.",
           });
+        }
         const created = await accountsRepository.acceptInvitation(invitation, {
           name: input.name,
           passwordHash: hash,
         });
-        if (!created)
+        if (!created) {
           throw new HTTPException(410, {
             message: "This invitation has already been used.",
           });
+        }
         return created;
       });
       await startSession(c, user);
@@ -420,10 +444,11 @@ export function createAccountsRouter(): Hono {
         const input = c.req.valid("json");
         if (input.enabled) {
           validateIssuer(input.issuer);
-          if (!input.clientId)
+          if (!input.clientId) {
             throw new HTTPException(400, {
               message: "Enter the client ID from your identity provider.",
             });
+          }
         }
         const user = requireRole(c, "admin");
         const previous = await accountsRepository.getSso();
@@ -482,7 +507,9 @@ export function createAccountsRouter(): Hono {
     async (c) => {
       limit("oidc-start", 30);
       const link = c.req.valid("json").link === true;
-      if (link) requireBrowserSession(c);
+      if (link) {
+        requireBrowserSession(c);
+      }
       return c.json({ url: await beginOidc(c, link) });
     }
   );

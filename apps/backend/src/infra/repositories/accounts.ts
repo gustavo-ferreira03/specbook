@@ -163,7 +163,9 @@ export const accountsRepository = {
           )
         )
     )[0];
-    if (!row) return null;
+    if (!row) {
+      return null;
+    }
     const used = await db
       .update(personalAccessTokens)
       .set({ lastUsedAt: now() })

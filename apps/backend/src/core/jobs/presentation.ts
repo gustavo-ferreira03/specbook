@@ -156,7 +156,9 @@ function firstBy<T>(
   const map = new Map<string, T>();
   for (const row of rows) {
     const value = key(row);
-    if (value && !map.has(value)) map.set(value, row);
+    if (value && !map.has(value)) {
+      map.set(value, row);
+    }
   }
   return map;
 }
@@ -168,8 +170,9 @@ function plainExcerpt(text: string): string | null {
     /(?:Error:|Timeout|spec\.ts|spec\.yml|\bjob\b|\bsteward\b|\bbudget\b|\bverification\b|\bcommit\b|\bproposal\b|\bgetByRole\b|[{}]|\[server path\])/i.test(
       clean
     )
-  )
+  ) {
     return null;
+  }
   return clean
     .split(/(?<=[.!?])\s/)
     .slice(0, 2)
@@ -199,22 +202,27 @@ function plainReason(text: string, code?: ErrorCode | null): string {
       "The Spec still needs attention before it can run successfully."
     );
   }
-  if (/origin is not allowed|allowed origins/i.test(text))
+  if (/origin is not allowed|allowed origins/i.test(text)) {
     return "The saved sign-in details are not allowed on this application address.";
+  }
   if (
     /credential|password|sign.?in|log.?in|session expired|credencia/i.test(text)
-  )
+  ) {
     return "The Spec needs access to the application before it can continue.";
+  }
   if (
     /ERR_CONNECTION|ERR_NAME|unreachable|could not be reached|HTTP 50[234]/i.test(
       text
     )
-  )
+  ) {
     return "The application could not be reached.";
-  if (/timeout|timed out|toBeVisible|toHaveText|locator/i.test(text))
+  }
+  if (/timeout|timed out|toBeVisible|toHaveText|locator/i.test(text)) {
     return "An expected button or result was not available during the test run.";
-  if (/invalid|cannot run|validation|not allowed|parse/i.test(text))
+  }
+  if (/invalid|cannot run|validation|not allowed|parse/i.test(text)) {
     return "The current Spec could not run as written.";
+  }
   return (
     plainExcerpt(text) ??
     "The Spec still needs attention before it can run successfully."
@@ -222,8 +230,9 @@ function plainReason(text: string, code?: ErrorCode | null): string {
 }
 
 function batchTitle(item: InboxItem, batch: SpecBatch): string {
-  if (item.status !== "approved")
+  if (item.status !== "approved") {
     return `Which of these ${batch.candidates.length} Specs would you like to add?`;
+  }
   const selected = batch.candidates.filter((candidate) => candidate.selected);
   const finished = selected.filter((candidate) =>
     ["passed", "failed", "stopped"].includes(candidate.state)
@@ -262,7 +271,7 @@ async function screenshotsFor(
   const afterFile = beforeFile
     ? verification?.screenshots?.find((file) => file === beforeFile)
     : verification?.screenshots?.at(-1);
-  if (afterFile && isStepScreenshot(afterFile))
+  if (afterFile && isStepScreenshot(afterFile)) {
     screenshots.after = {
       url: `/projects/${projectId}/inbox/${item.id}/evidence/${afterFile}`,
       label:
@@ -270,6 +279,7 @@ async function screenshotsFor(
           ? "After the update"
           : "Latest attempt",
     };
+  }
   return screenshots;
 }
 
@@ -312,7 +322,9 @@ export async function projectPresentation(
     settingsRepository.getAgentPaused(),
     state ?? loadProjectState(projectId),
   ]);
-  if (!project) throw new Error("Project not found");
+  if (!project) {
+    throw new Error("Project not found");
+  }
   const agentPaused = settings.paused || globallyPaused;
   const jobsById = new Map(jobs.map((job) => [job.id, job]));
   const selectedSpecTitles = new Map<string, string>();
@@ -320,8 +332,9 @@ export async function projectPresentation(
     const candidates = specBatchOf(item)?.candidates;
     for (const candidate of Array.isArray(candidates) ? candidates : []) {
       const { jobId, title } = record(candidate);
-      if (typeof jobId === "string" && typeof title === "string")
+      if (typeof jobId === "string" && typeof title === "string") {
         selectedSpecTitles.set(jobId, title);
+      }
     }
   }
   const specsById = new Map(specs.map((spec) => [spec.id, spec]));
@@ -355,7 +368,7 @@ export async function projectPresentation(
       : undefined;
   };
   const forSignal = (signal: ProjectSignal): Subject => {
-    if (["deployment", "deployment_changed"].includes(signal.kind))
+    if (["deployment", "deployment_changed"].includes(signal.kind)) {
       return {
         type: "deployment",
         id: `${string(signal.payload.environment) ?? "app"}:${string(signal.payload.url) ?? project.baseUrl}`,
@@ -363,6 +376,7 @@ export async function projectPresentation(
           ? `${signal.payload.environment} deployment`
           : "Application updates",
       };
+    }
     return (
       specSubject(
         Array.isArray(signal.payload.specIds)
@@ -444,15 +458,19 @@ export async function projectPresentation(
   const newestAwaiting = new Map<string, string>();
   for (const item of inbox.filter(awaiting)) {
     const key = subjectKey(itemSubjects.get(item.id)!);
-    if (item.createdAt > (newestAwaiting.get(key) ?? ""))
+    if (item.createdAt > (newestAwaiting.get(key) ?? "")) {
       newestAwaiting.set(key, item.createdAt);
+    }
   }
   const items: PresentedItem[] = [];
   for (const item of inbox) {
-    if (item.kind === "note" || payloadOf(item).retiredByScope === true)
+    if (item.kind === "note" || payloadOf(item).retiredByScope === true) {
       continue;
+    }
     const job = jobsById.get(item.jobId);
-    if (job && infrastructureJobs.has(job.id)) continue;
+    if (job && infrastructureJobs.has(job.id)) {
+      continue;
+    }
     const subject = itemSubjects.get(item.id)!;
     const params = record(payloadOf(item).params);
     const before = record(payloadOf(item).before);
@@ -464,10 +482,16 @@ export async function projectPresentation(
         diagnostic,
         verification?.errorCode ?? payloadOf(item).errorCode ?? job?.errorCode
       )
-    )
+    ) {
       continue;
-    if (item.kind === "question" && awaiting(item) && job?.status !== "blocked")
+    }
+    if (
+      item.kind === "question" &&
+      awaiting(item) &&
+      job?.status !== "blocked"
+    ) {
       continue;
+    }
     const patchSpecId = string(params.specId);
     if (item.kind === "spec_fix" && awaiting(item)) {
       const raw = patchSpecId ? rawSpecs.get(patchSpecId) : null;
@@ -475,8 +499,9 @@ export async function projectPresentation(
         !raw ||
         (typeof before.yaml === "string" && raw.yaml !== before.yaml) ||
         ("testSource" in before && raw.testSource !== before.testSource)
-      )
+      ) {
         continue;
+      }
     }
     const verified =
       verification?.status === "passed" &&
@@ -489,14 +514,16 @@ export async function projectPresentation(
       awaiting(item) &&
       job &&
       (active(job.status) || (job.status === "stalled" && job.retryAt))
-    )
+    ) {
       continue;
+    }
     if (
       unfinished &&
       awaiting(item) &&
       (newestAwaiting.get(subjectKey(subject)) ?? "") > item.createdAt
-    )
+    ) {
       continue;
+    }
     const batch =
       item.kind === "spec_batch" ? await presentSpecBatch(item) : undefined;
     const type =
@@ -675,16 +702,21 @@ export async function projectPresentation(
   };
   for (const signal of signals.filter(
     (signal) => !["job_completed", "credentials_changed"].includes(signal.kind)
-  ))
+  )) {
     group(forSignal(signal)).signals.push(signal);
+  }
   for (const intent of intents) {
     const job = intent.jobId ? jobsById.get(intent.jobId) : undefined;
-    if (!job || !infrastructureJobs.has(job.id))
+    if (!job || !infrastructureJobs.has(job.id)) {
       group(job ? forJob(job) : forIntent(intent)).intents.push(intent);
+    }
   }
-  for (const job of jobs)
+  for (const job of jobs) {
     if (!infrastructureJobs.has(job.id)) group(forJob(job)).jobs.push(job);
-  for (const item of items) group(itemSubjects.get(item.id)!).items.push(item);
+  }
+  for (const item of items) {
+    group(itemSubjects.get(item.id)!).items.push(item);
+  }
   const activity: ActivityStory[] = [];
   for (const [id, value] of groups) {
     const { subject } = value;
@@ -817,15 +849,18 @@ export async function projectPresentation(
         : noticed
           ? NOTICED_TEXT[noticed.kind]
           : undefined;
-    if (noticed && noticedDetail && noticedDetail !== summary)
+    if (noticed && noticedDetail && noticedDetail !== summary) {
       timeline.push({
         id: noticed.id,
         label: "Noticed",
         detail: noticedDetail,
         createdAt: noticed.createdAt,
       });
+    }
     for (const item of value.items) {
-      if (!payloadOf(item).verification) continue;
+      if (!payloadOf(item).verification) {
+        continue;
+      }
       const verifiedAction = actions
         .get(item.jobId)
         ?.find(
@@ -833,13 +868,14 @@ export async function projectPresentation(
             action.action === "proposal:verified" &&
             action.detail?.startsWith(`${item.id}:`)
         );
-      if (verifiedAction)
+      if (verifiedAction) {
         timeline.push({
           id: `${item.id}:test`,
           label: "Tested update",
           detail: item.presentation.workDone,
           createdAt: verifiedAction.createdAt,
         });
+      }
     }
     if (latestItem?.kind === "spec_batch") {
       const batch = specBatchOf(latestItem)!;
@@ -855,7 +891,7 @@ export async function projectPresentation(
             : latestItem.presentation.title,
         createdAt: batch.selectedAt ?? latestItem.createdAt,
       });
-      for (const candidate of selected)
+      for (const candidate of selected) {
         if (candidate.runId && candidate.finishedAt)
           timeline.push({
             id: candidate.runId,
@@ -865,7 +901,8 @@ export async function projectPresentation(
             specId: candidate.specId,
             runId: candidate.runId,
           });
-    } else if (latestItem)
+      }
+    } else if (latestItem) {
       timeline.push({
         id: latestItem.id,
         label: awaiting(latestItem)
@@ -886,7 +923,7 @@ export async function projectPresentation(
               : `Set aside the suggestion for “${subject.name}”.`,
         createdAt: latestItem.updatedAt,
       });
-    else if (paused && latestJob)
+    } else if (paused && latestJob) {
       timeline.push({
         id: `${latestJob.id}:pause`,
         label: "Paused by you",
@@ -895,6 +932,7 @@ export async function projectPresentation(
           : "Specbook is paused for this project.",
         createdAt: settings.updatedAt,
       });
+    }
     timeline.sort(oldestFirst);
     const times = [
       ...value.signals.map((signal) => signal.createdAt),

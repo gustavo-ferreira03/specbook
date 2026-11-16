@@ -40,32 +40,39 @@ function cronField(
   const values = new Set<number>();
   for (const part of source.split(",")) {
     const match = /^(\*|\d+(?:-\d+)?)(?:\/(\d+))?$/.exec(part);
-    if (!match)
+    if (!match) {
       throw new Error(
         "Use numbers, *, comma lists, ranges and /steps in cron fields"
       );
+    }
     const step = Number(match[2] ?? 1);
-    if (!Number.isSafeInteger(step) || step < 1 || step > max - min + 1)
+    if (!Number.isSafeInteger(step) || step < 1 || step > max - min + 1) {
       throw new Error("Invalid cron step");
+    }
     const range =
       match[1] === "*" ? [min, max] : match[1]!.split("-").map(Number);
     const start = range[0]!;
     const end = range[1] ?? (match[2] ? max : start);
-    if (start < min || end > max || start > end)
+    if (start < min || end > max || start > end) {
       throw new Error(`Cron values must be between ${min} and ${max}`);
-    for (let value = start; value <= end; value += step)
+    }
+    for (let value = start; value <= end; value += step) {
       values.add(sunday && value === 7 ? 0 : value);
+    }
   }
   return { values, wildcard: source.includes("*") };
 }
 
 export function nextCronAt(cron: string, after = new Date()): string {
-  if (cron.length > 120) throw new Error("Cron expression is too long");
+  if (cron.length > 120) {
+    throw new Error("Cron expression is too long");
+  }
   const fields = cron.trim().split(/\s+/);
-  if (fields.length !== 5)
+  if (fields.length !== 5) {
     throw new Error(
       "Cron needs five fields: minute hour day month weekday (UTC)"
     );
+  }
   const [minute, hour, day, month, weekday] = [
     cronField(fields[0]!, 0, 59),
     cronField(fields[1]!, 0, 23),
@@ -160,14 +167,16 @@ export function publicAutomation(
 export async function updateAutomation(projectId: string, input: unknown) {
   const patch = automationSettingsSchema.parse(input);
   return withAutomationLock(projectId, async () => {
-    if (!(await projectsRepository.getProject(projectId)))
+    if (!(await projectsRepository.getProject(projectId))) {
       throw new Error("Project not found");
+    }
     if (patch.specIds) {
       const available = new Set(
         (await specsRepository.listSpecs(projectId)).map((spec) => spec.id)
       );
-      if (patch.specIds.some((id) => !available.has(id)))
+      if (patch.specIds.some((id) => !available.has(id))) {
         throw new Error("Every selected Spec must belong to this project");
+      }
     }
     const previous = await schedulesRepository.get(projectId);
     const cron =
@@ -182,8 +191,9 @@ export async function updateAutomation(projectId: string, input: unknown) {
       webhookUrl &&
       (patch.webhookUrl !== undefined ||
         patch.allowPrivateWebhook !== undefined)
-    )
+    ) {
       await resolveTarget(webhookUrl, allowPrivateWebhook);
+    }
     const row = await schedulesRepository.save(projectId, {
       cron,
       specIds: patch.specIds
@@ -201,8 +211,9 @@ export async function updateAutomation(projectId: string, input: unknown) {
     if (
       patch.webhookUrl !== undefined &&
       patch.webhookUrl !== previous?.webhookUrl
-    )
+    ) {
       await schedulesRepository.cancelPendingNotifications(projectId);
+    }
     return publicAutomation(projectId, row);
   });
 }
@@ -210,12 +221,17 @@ export async function updateAutomation(projectId: string, input: unknown) {
 async function scheduleProject(projectId: string, at: Date): Promise<void> {
   await withAutomationLock(projectId, async () => {
     const automation = await schedulesRepository.get(projectId);
-    if (!automation || stopped) return;
+    if (!automation || stopped) {
+      return;
+    }
     if (automation.lastBatchId) {
       const batch = await getRunBatch(automation.lastBatchId);
-      if (batch && batch.status !== automation.lastBatchStatus)
+      if (batch && batch.status !== automation.lastBatchStatus) {
         await recordBatch(automation, batch);
-      if (batch?.status === "running") return;
+      }
+      if (batch?.status === "running") {
+        return;
+      }
       if (!batch && automation.lastBatchStatus === "running") {
         await schedulesRepository.update(projectId, {
           lastBatchStatus: "error",
@@ -228,16 +244,18 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
       !automation.nextRunAt ||
       Date.parse(automation.nextRunAt) > at.getTime() ||
       (await isAgentPaused(projectId))
-    )
+    ) {
       return;
+    }
     const allSpecs = await specsRepository.listSpecs(projectId);
     const selected = automation.specIds.length
       ? allSpecs.filter((spec) => automation.specIds.includes(spec.id))
       : allSpecs;
     const runnable = selected.filter((spec) => spec.status !== "invalid");
     const ids = runnable.map((spec) => spec.id);
-    if (areSpecsLocked(ids) || (await runsRepository.hasRunningRuns(ids)))
+    if (areSpecsLocked(ids) || (await runsRepository.hasRunningRuns(ids))) {
       return;
+    }
     const nextRunAt = nextCronAt(automation.cron, at);
     if (
       !(await schedulesRepository.claimDue(
@@ -245,8 +263,9 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
         automation.nextRunAt,
         nextRunAt
       ))
-    )
+    ) {
       return;
+    }
     try {
       if (
         automation.specIds.length &&
@@ -264,22 +283,26 @@ async function scheduleProject(projectId: string, at: Date): Promise<void> {
         await schedulesRepository.update(projectId, { lastError: null });
         return;
       }
-      if (!ids.length)
+      if (!ids.length) {
         throw new CodedError(
           "invalid_spec",
           "There are no runnable Specs. Add a Spec or resolve the invalid Specs before the next scheduled run."
         );
+      }
       await startSpecBatch(projectId, ids, "Scheduled run", {
         trigger: "schedule",
         healFailures: automation.healFailures,
         onPrepared: async (batch) => {
-          if (stopped || (await isAgentPaused(projectId)))
+          if (stopped || (await isAgentPaused(projectId))) {
             throw new Error("Scheduling stopped before execution");
+          }
           await recordBatch(automation, batch);
         },
       });
     } catch (error) {
-      if (stopped || !(await projectsRepository.getProject(projectId))) return;
+      if (stopped || !(await projectsRepository.getProject(projectId))) {
+        return;
+      }
       const scrub = await projectSecretScrubber(projectId);
       const message = scrub(
         error instanceof Error ? error.message : String(error)
@@ -305,12 +328,16 @@ export async function deliverWebhookNotifications(
   );
   await Promise.all(
     pending.map(async (row) => {
-      if (stopped) return;
+      if (stopped) {
+        return;
+      }
       const claimed = await schedulesRepository.claimNotification(
         row,
         at.toISOString()
       );
-      if (!claimed) return;
+      if (!claimed) {
+        return;
+      }
       const controller = new AbortController();
       deliveries.add(controller);
       const timeout = setTimeout(() => controller.abort(), 5000);
@@ -325,8 +352,9 @@ export async function deliverWebhookNotifications(
             signal: controller.signal,
           }
         );
-        if (status < 200 || status >= 300)
+        if (status < 200 || status >= 300) {
           error = `Webhook returned HTTP ${status}`;
+        }
       } catch (caught) {
         error =
           caught instanceof NetworkTargetError
@@ -346,11 +374,15 @@ export async function deliverWebhookNotifications(
 }
 
 export async function processSchedules(at = new Date()): Promise<void> {
-  if (processing || stopped) return;
+  if (processing || stopped) {
+    return;
+  }
   processing = true;
   try {
     for (const row of await schedulesRepository.list()) {
-      if (stopped) break;
+      if (stopped) {
+        break;
+      }
       await scheduleProject(row.projectId, at).catch((error) =>
         logger.error("scheduled run failed", {
           projectId: row.projectId,
@@ -385,5 +417,7 @@ export function startScheduleMonitor(): void {
 export function stopScheduleMonitor(): void {
   stopped = true;
   clearInterval(timer);
-  for (const controller of deliveries) controller.abort();
+  for (const controller of deliveries) {
+    controller.abort();
+  }
 }

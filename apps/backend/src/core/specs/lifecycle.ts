@@ -17,7 +17,9 @@ export async function settleSpecLocks(
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (areSpecsLocked(specIds)) {
-    if (Date.now() >= deadline) return false;
+    if (Date.now() >= deadline) {
+      return false;
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return true;
@@ -40,10 +42,11 @@ export async function acquireSpecLocks(
   options: { wait?: boolean } = {}
 ): Promise<() => Promise<void>> {
   const ids = [...new Set(specIds)].sort();
-  if (options.wait === false && areSpecsLocked(ids))
+  if (options.wait === false && areSpecsLocked(ids)) {
     throw new ResourceBusyError(
       "Selected Specs are already in use; retry after their current operation finishes"
     );
+  }
   const held: { done: Promise<void>; release: () => void }[] = [];
   for (const id of ids) {
     let release: () => void = () => {};
@@ -61,10 +64,14 @@ export async function acquireSpecLocks(
       }),
       release,
     });
-    if (options.wait !== false) await started;
+    if (options.wait !== false) {
+      await started;
+    }
   }
   return async () => {
-    for (const lock of held) lock.release();
+    for (const lock of held) {
+      lock.release();
+    }
     await Promise.all(held.map((lock) => lock.done));
   };
 }

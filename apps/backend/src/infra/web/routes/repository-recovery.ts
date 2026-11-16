@@ -44,8 +44,9 @@ export function createRepositoryRecoveryRoutes(): Hono {
           )
         );
       } catch (error) {
-        if (error instanceof RepositoryRecoveryError)
+        if (error instanceof RepositoryRecoveryError) {
           throw new HTTPException(409, { message: error.message });
+        }
         throw error;
       }
     }

@@ -79,29 +79,43 @@ export function formatRelative(
 ): string {
   const date = toDate(value);
   let delta = (date.getTime() - now) / 1000;
-  if (Math.abs(delta) < 45) return "just now";
+  if (Math.abs(delta) < 45) {
+    return "just now";
+  }
   for (const [unit, size] of RELATIVE_STEPS) {
     if (Math.abs(delta) < size) {
-      if (unit === "year") break;
+      if (unit === "year") {
+        break;
+      }
       return relativeFormatter.format(Math.round(delta), unit);
     }
     delta /= size;
-    if (unit === "month" && Math.abs(delta) >= 1) return formatDate(date);
+    if (unit === "month" && Math.abs(delta) >= 1) {
+      return formatDate(date);
+    }
   }
   return formatDate(date);
 }
 
 export function formatWaitDuration(durationMs: number): string {
-  if (durationMs < 60_000) return "under a minute";
+  if (durationMs < 60_000) {
+    return "under a minute";
+  }
   const minutes = Math.floor(durationMs / 60_000);
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
   const hours = Math.floor(minutes / 60);
   return `${hours} hr`;
 }
 
 export function formatDuration(durationMs: number): string {
-  if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
-  if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)}s`;
+  if (durationMs < 1000) {
+    return `${Math.round(durationMs)}ms`;
+  }
+  if (durationMs < 60_000) {
+    return `${(durationMs / 1000).toFixed(1)}s`;
+  }
   const minutes = Math.floor(durationMs / 60_000);
   const seconds = Math.round((durationMs % 60_000) / 1000);
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;

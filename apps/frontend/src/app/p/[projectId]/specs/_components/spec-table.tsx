@@ -71,7 +71,9 @@ function GroupSummary({ specs }: { specs: SpecSummary[] }) {
   const problems = SPEC_STATUS_ORDER.filter(
     (status) => status !== "passed" && (counts[status] ?? 0) > 0
   );
-  if (problems.length === 0) return null;
+  if (problems.length === 0) {
+    return null;
+  }
   return (
     <span className="text-meta text-ink-muted hidden items-center gap-2.5 sm:flex">
       {problems.map((status) => {
@@ -99,13 +101,16 @@ function GroupSummary({ specs }: { specs: SpecSummary[] }) {
 }
 
 function LastRunText({ run }: { run: Run | null | undefined }) {
-  if (run === undefined) return <Skeleton className="ml-auto h-3 w-20" />;
-  if (run === null)
+  if (run === undefined) {
+    return <Skeleton className="ml-auto h-3 w-20" />;
+  }
+  if (run === null) {
     return (
       <span className="text-ink-subtle" aria-label="Not run">
         —
       </span>
     );
+  }
   return (
     <span className="inline-flex flex-wrap items-center gap-x-1.5 lg:flex-col lg:items-end">
       <RelativeTime value={run.startedAt} />

@@ -23,7 +23,9 @@ export function useWideLayout(): boolean {
 }
 
 export function originOf(url: string | null | undefined): string {
-  if (!url) return "";
+  if (!url) {
+    return "";
+  }
   try {
     return new URL(url).host;
   } catch {

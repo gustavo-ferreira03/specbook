@@ -105,8 +105,9 @@ async function proposeAndVerify({ job, tool, args }: ToolCall) {
   const verification = ["failure_triage", "regenerate"].includes(job.kind)
     ? await verifyProposal(job, item, args[2])
     : undefined;
-  if (verification?.status === "passed")
+  if (verification?.status === "passed") {
     await applyVerifiedRepairs(job.projectId);
+  }
   const saved = (await jobsRepository.item(item.id))?.status === "approved";
   const unproven =
     verification?.status === "passed"
@@ -132,15 +133,18 @@ async function proposeAndVerify({ job, tool, args }: ToolCall) {
 }
 
 async function runInvestigated({ job, tool, args }: ToolCall) {
-  if (z.object({ specId: z.string() }).parse(args[1]).specId !== job.specId)
+  if (z.object({ specId: z.string() }).parse(args[1]).specId !== job.specId) {
     throw new Error("Run the Spec being investigated");
+  }
   const item = (
     await jobsRepository.itemsForJob(job.id, {
       kind: "spec_fix",
       statuses: ["pending"],
     })
   )[0];
-  if (item) return result(await verifyProposal(job, item, args[2]));
+  if (item) {
+    return result(await verifyProposal(job, item, args[2]));
+  }
   const output = await tool.execute(...args);
   const text = output.content
     .map((part) => (part.type === "text" ? part.text : ""))
@@ -154,8 +158,9 @@ async function runInvestigated({ job, tool, args }: ToolCall) {
       }
     })()
   );
-  if (rerun.success && ["failed", "error"].includes(rerun.data.status))
+  if (rerun.success && ["failed", "error"].includes(rerun.data.status)) {
     await jobsRepository.update(job.id, { runId: rerun.data.runId });
+  }
   return output;
 }
 
@@ -254,10 +259,11 @@ export function createJobPolicy(
   const check = async () => {
     await pending;
     const current = await jobsRepository.get(job.id);
-    if (current?.status !== "running")
+    if (current?.status !== "running") {
       throw new Error(
         "Job is paused or stopped. No further actions are allowed."
       );
+    }
     if (await isAgentPaused(job.projectId)) {
       await jobsRepository.transition(job.id, "running", "paused");
       abort();
@@ -411,8 +417,9 @@ export function createJobPolicy(
             });
             const text = JSON.stringify(output);
             const code = errorCodeOf(output) ?? "failed";
-            if ((output as { isError?: boolean }).isError && code)
+            if ((output as { isError?: boolean }).isError && code) {
               await jobsRepository.update(job.id, { errorCode: code });
+            }
             if (
               (output as { isError?: boolean }).isError &&
               isInfrastructureCode(code)
@@ -424,7 +431,9 @@ export function createJobPolicy(
             return output;
           } catch (error) {
             const code = errorCodeOf(error);
-            if (code) await jobsRepository.update(job.id, { errorCode: code });
+            if (code) {
+              await jobsRepository.update(job.id, { errorCode: code });
+            }
             await jobsRepository.log(
               job.id,
               `${tool.name}:error`,

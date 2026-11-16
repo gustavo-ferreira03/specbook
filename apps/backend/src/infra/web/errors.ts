@@ -6,8 +6,9 @@ import { HTTPException } from "hono/http-exception";
 import { logger } from "../logger";
 
 export const handleRequestError: ErrorHandler = (error, c) => {
-  if (error instanceof HTTPException && error.status < 500)
+  if (error instanceof HTTPException && error.status < 500) {
     return c.json({ error: error.message }, error.status);
+  }
   const errorId = crypto.randomUUID();
   logger.error("request failed", {
     errorId,

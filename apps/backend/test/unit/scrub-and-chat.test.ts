@@ -54,10 +54,11 @@ describe("environment credential profiles", () => {
     const mcp = {
       client: {
         async callTool(input: { name: string; arguments: { text?: string } }) {
-          if (input.name === "browser_tabs")
+          if (input.name === "browser_tabs") {
             return {
               content: [{ type: "text", text: `- Page URL: ${activeUrl}` }],
             };
+          }
           typed.push(input.arguments.text!);
           return { content: [{ type: "text", text: "Credential filled" }] };
         },
@@ -321,12 +322,13 @@ describe("environment credential profiles", () => {
           name: string;
           arguments: { function?: string };
         }) {
-          if (input.name === "browser_tabs")
+          if (input.name === "browser_tabs") {
             return {
               content: [
                 { type: "text", text: `- Page URL: ${project.baseUrl}` },
               ],
             };
+          }
           const fn = input.arguments.function!;
           if (fn.includes("const fills =")) {
             written.push(fn);
@@ -559,14 +561,16 @@ describe("conversation failure messages", () => {
       "The saved standard-user session restored, but the browser could not confirm or inspect the application page address. Could you restore browser access?",
       "The browser could not inspect its open tabs: Browser is already in use for /tmp/profile",
       "browser tool failed: Error: async initializeServer: EROFS: read-only file system, open '/home/server/.cache/ms-playwright/b/browser@123'",
-    ])
+    ]) {
       assert.equal(isInfrastructureFailure(failure), true, failure);
+    }
     for (const question of [
       "The saved session expired. Can you provide a valid account for the app?",
       "The app redirected to an external origin. Can you allow this origin for the project?",
       "The application rejected the password for the standard-user profile.",
-    ])
+    ]) {
       assert.equal(isInfrastructureFailure(question), false, question);
+    }
   });
 
   test("a timed out turn aborts its work before releasing the conversation", async () => {

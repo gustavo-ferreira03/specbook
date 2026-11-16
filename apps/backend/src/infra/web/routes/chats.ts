@@ -42,8 +42,9 @@ export function createChatsRouter(): Hono {
     zValidator("json", messageSchema),
     async (c) => {
       const project = await projectsRepository.getProject(c.req.param("id"));
-      if (!project)
+      if (!project) {
         throw new HTTPException(404, { message: "Project not found" });
+      }
       const { text } = c.req.valid("json");
       const chat = await createChat(project.id, {}, chatTitle(text));
       startChatTurn(chat.id, text);
@@ -53,8 +54,9 @@ export function createChatsRouter(): Hono {
 
   router.get("/projects/:id/chats", access("viewer"), async (c) => {
     const project = await projectsRepository.getProject(c.req.param("id"));
-    if (!project)
+    if (!project) {
       throw new HTTPException(404, { message: "Project not found" });
+    }
     return c.json({ chats: await listChats(project.id) });
   });
 
@@ -64,8 +66,9 @@ export function createChatsRouter(): Hono {
       chatsRepository.getChatRow(id),
       getChatView(id),
     ]);
-    if (!row || !view)
+    if (!row || !view) {
       throw new HTTPException(404, { message: "Chat not found" });
+    }
     const browser = await getChatBrowser(id);
     const revision = row.contextRevisionId
       ? await projectContextsRepository.getProjectContextRevision(
@@ -104,8 +107,9 @@ export function createChatsRouter(): Hono {
 
   router.get("/chats/:id/events", access("viewer"), async (c) => {
     const id = c.req.param("id");
-    if (!(await chatsRepository.getChatRow(id)))
+    if (!(await chatsRepository.getChatRow(id))) {
       throw new HTTPException(404, { message: "Chat not found" });
+    }
     c.res = streamSSE(c, async (stream) => {
       let releaseSession = () => {};
       const notify = (event: ChatUpdateEvent) =>
@@ -125,10 +129,11 @@ export function createChatsRouter(): Hono {
         unsubscribe();
         releaseSession();
       });
-      if (c.get("user"))
+      if (c.get("user")) {
         releaseSession = await watchSession(c.req.raw.headers, () =>
           stream.abort()
         );
+      }
       if (stream.aborted) {
         releaseSession();
         return;
@@ -145,24 +150,30 @@ export function createChatsRouter(): Hono {
 
   router.get("/chats/:id/results", access("viewer"), async (c) => {
     const results = await chatResults(c.req.param("id"));
-    if (!results) throw new HTTPException(404, { message: "Chat not found" });
+    if (!results) {
+      throw new HTTPException(404, { message: "Chat not found" });
+    }
     return c.json(results);
   });
 
   router.delete("/chats/:id", access("editor"), async (c) => {
     try {
-      if (await jobsRepository.forChat(c.req.param("id")))
+      if (await jobsRepository.forChat(c.req.param("id"))) {
         throw new HTTPException(409, {
           message: "Job sessions are retained for audit",
         });
+      }
       if (!(await deleteChatData(c.req.param("id")))) {
         throw new HTTPException(404, { message: "Chat not found" });
       }
       return c.body(null, 204);
     } catch (error) {
-      if (error instanceof HTTPException) throw error;
-      if (error instanceof ResourceBusyError)
+      if (error instanceof HTTPException) {
+        throw error;
+      }
+      if (error instanceof ResourceBusyError) {
         throw new HTTPException(409, { message: error.message });
+      }
       throw error;
     }
   });
@@ -265,13 +276,18 @@ async function assertChatWritable(
   options: { allowBusy?: boolean } = {}
 ): Promise<void> {
   const row = await chatsRepository.getChatRow(id);
-  if (!row) throw new HTTPException(404, { message: "Chat not found" });
-  if (await jobsRepository.forChat(id))
+  if (!row) {
+    throw new HTTPException(404, { message: "Chat not found" });
+  }
+  if (await jobsRepository.forChat(id)) {
     throw new HTTPException(409, {
       message: "Use the project Inbox to answer this job",
     });
-  if (isChatDeleting(id))
+  }
+  if (isChatDeleting(id)) {
     throw new HTTPException(409, { message: "Chat is being deleted" });
-  if (!options.allowBusy && isChatBusy(id))
+  }
+  if (!options.allowBusy && isChatBusy(id)) {
     throw new HTTPException(409, { message: "The agent is still replying" });
+  }
 }

@@ -50,8 +50,9 @@ export { ResourceBusyError };
 function entityDirectory(root: string, id: string): string {
   const absoluteRoot = path.resolve(root);
   const directory = path.resolve(absoluteRoot, id);
-  if (path.dirname(directory) !== absoluteRoot)
+  if (path.dirname(directory) !== absoluteRoot) {
     throw new Error("Invalid storage directory");
+  }
   return directory;
 }
 
@@ -65,7 +66,9 @@ async function removeEntityDirectories(
     )
   );
   for (const result of results) {
-    if (result.status === "rejected") console.error(result.reason);
+    if (result.status === "rejected") {
+      console.error(result.reason);
+    }
   }
 }
 
@@ -89,7 +92,9 @@ async function removeRunDirectories(runIds: string[]): Promise<void> {
           "utf8"
         )
       ) as { batchId?: unknown };
-      if (typeof link.batchId === "string") batchIds.add(link.batchId);
+      if (typeof link.batchId === "string") {
+        batchIds.add(link.batchId);
+      }
     } catch {}
   }
   await removeEntityDirectories(runsDir, runIds);
@@ -105,11 +110,14 @@ async function removeRunDirectories(runIds: string[]): Promise<void> {
 }
 
 export async function deleteChatData(id: string): Promise<boolean> {
-  if (!(await chatsRepository.getChatRow(id))) return false;
-  if (!beginChatDeletion(id))
+  if (!(await chatsRepository.getChatRow(id))) {
+    return false;
+  }
+  if (!beginChatDeletion(id)) {
     throw new ResourceBusyError(
       "Wait for the agent to finish before deleting this chat"
     );
+  }
   try {
     await blockChatBrowser(id);
     await projectContextsRepository.discardDraftForChat(id);
@@ -124,7 +132,9 @@ export async function deleteChatData(id: string): Promise<boolean> {
     removeChatBrowserData(id),
   ]);
   for (const result of cleanup) {
-    if (result.status === "rejected") console.error(result.reason);
+    if (result.status === "rejected") {
+      console.error(result.reason);
+    }
   }
   cancelChatBrowserDeletion(id);
   cancelChatDeletion(id);
@@ -143,7 +153,9 @@ export async function deleteSpecData(id: string): Promise<boolean> {
   }
   return withSpecLock(id, async () => {
     const spec = await specsRepository.getSpec(id);
-    if (!spec) return false;
+    if (!spec) {
+      return false;
+    }
     if (await runsRepository.hasRunningRuns([id])) {
       throw new ResourceBusyError(
         "Wait for the current Spec run to finish before deleting it"
@@ -151,7 +163,9 @@ export async function deleteSpecData(id: string): Promise<boolean> {
     }
     await deleteSpecFiles(spec);
     const result = await specsRepository.deleteSpecWithRelations(id);
-    if (result.status === "not_found") return false;
+    if (result.status === "not_found") {
+      return false;
+    }
     if (result.status === "busy") {
       throw new ResourceBusyError(
         "Wait for the current Spec run to finish before deleting it"
@@ -164,7 +178,9 @@ export async function deleteSpecData(id: string): Promise<boolean> {
 
 export async function deleteFeatureData(id: string): Promise<boolean> {
   const specIds = await featuresRepository.getFeatureDeletionSpecIds(id);
-  if (!specIds) return false;
+  if (!specIds) {
+    return false;
+  }
   if (
     areSpecsLocked(specIds) &&
     ((await runsRepository.hasRunningRuns(specIds)) ||
@@ -176,7 +192,9 @@ export async function deleteFeatureData(id: string): Promise<boolean> {
   }
   return withSpecLocks(specIds, async () => {
     const feature = await featuresRepository.getFeature(id);
-    if (!feature) return false;
+    if (!feature) {
+      return false;
+    }
     if (await runsRepository.hasRunningRuns(specIds)) {
       throw new ResourceBusyError(
         "Wait for active Spec runs in this Feature to finish before deleting it"
@@ -188,7 +206,9 @@ export async function deleteFeatureData(id: string): Promise<boolean> {
       feature.title
     );
     const result = await featuresRepository.deleteFeatureWithRelations(id);
-    if (result.status === "not_found") return false;
+    if (result.status === "not_found") {
+      return false;
+    }
     if (result.status === "busy") {
       throw new ResourceBusyError(
         "Wait for active Spec runs in this Feature to finish before deleting it"
@@ -201,7 +221,9 @@ export async function deleteFeatureData(id: string): Promise<boolean> {
 
 export async function deleteProjectData(id: string): Promise<boolean> {
   const project = await projectsRepository.getProject(id);
-  if (!project) return false;
+  if (!project) {
+    return false;
+  }
 
   if ((await jobsRepository.list(id)).some((job) => job.status === "running")) {
     throw new ResourceBusyError(
@@ -265,11 +287,12 @@ export async function deleteProjectData(id: string): Promise<boolean> {
       repoBare.removeBareRepo(id),
     ]);
     for (const result of removal) {
-      if (result.status === "rejected")
+      if (result.status === "rejected") {
         console.error(
           `[specbook] removing repositories of ${id} failed:`,
           result.reason
         );
+      }
     }
     return runRows.map((run) => run.id);
   });

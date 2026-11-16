@@ -23,7 +23,9 @@ export function VncViewer({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container) {
+      return;
+    }
     let connection: InstanceType<
       (typeof import("@novnc/novnc"))["default"]
     > | null = null;
@@ -33,10 +35,14 @@ export function VncViewer({
     container.replaceChildren();
 
     const handleConnect: EventListener = () => {
-      if (!cancelled) setStatus("connected");
+      if (!cancelled) {
+        setStatus("connected");
+      }
     };
     const handleDisconnect: EventListener = (event) => {
-      if (cancelled) return;
+      if (cancelled) {
+        return;
+      }
       const clean = (event as CustomEvent<{ clean?: boolean }>).detail?.clean;
       setError(
         clean
@@ -46,7 +52,9 @@ export function VncViewer({
       setStatus("error");
     };
     const handleSecurityFailure: EventListener = (event) => {
-      if (cancelled) return;
+      if (cancelled) {
+        return;
+      }
       const reason = (event as CustomEvent<{ reason?: string }>).detail?.reason;
       setError(reason || "The browser connection could not be secured.");
       setStatus("error");
@@ -55,7 +63,9 @@ export function VncViewer({
     async function connect() {
       try {
         const { default: noVNC } = await import("@novnc/novnc");
-        if (cancelled || !containerRef.current) return;
+        if (cancelled || !containerRef.current) {
+          return;
+        }
         connection = new noVNC(
           containerRef.current,
           websocketUrl(`/vnc/${encodeURIComponent(vncSessionId)}`),
@@ -71,7 +81,9 @@ export function VncViewer({
         connection.addEventListener("disconnect", handleDisconnect);
         connection.addEventListener("securityfailure", handleSecurityFailure);
       } catch (connectError) {
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         setError(
           connectError instanceof Error
             ? connectError.message

@@ -36,7 +36,9 @@ export class FileCredentialStore implements CredentialStore {
         decryptSecret(await readFile(this.filePath, "utf8"))
       ) as CredentialData;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return {};
+      }
       throw error;
     }
   }
@@ -69,7 +71,9 @@ export class FileCredentialStore implements CredentialStore {
     return this.withLock(async () => {
       const data = await this.readData();
       const next = await fn(data[providerId]);
-      if (next === undefined) return data[providerId];
+      if (next === undefined) {
+        return data[providerId];
+      }
       data[providerId] = next;
       await this.writeData(data);
       return next;

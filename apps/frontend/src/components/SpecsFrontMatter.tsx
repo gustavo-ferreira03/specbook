@@ -41,12 +41,16 @@ export function SpecsFrontMatter({ projectId }: { projectId: string }) {
     let active = true;
     getProjectContext(projectId)
       .then((result) => {
-        if (active) setContext(result.confirmed?.context ?? null);
+        if (active) {
+          setContext(result.confirmed?.context ?? null);
+        }
       })
       .catch(() => undefined);
     getCoverage(projectId)
       .then((result) => {
-        if (active) setCoverage(result);
+        if (active) {
+          setCoverage(result);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -66,7 +70,9 @@ export function SpecsFrontMatter({ projectId }: { projectId: string }) {
     }
   }
 
-  if (!context) return null;
+  if (!context) {
+    return null;
+  }
   const areas = coverage?.areas ?? [];
   return (
     <section aria-label="About this app" className="border-line border-b pb-7">

@@ -19,10 +19,11 @@ function migrationsFolder(): string {
   const found = candidates.find((candidate) =>
     fs.existsSync(path.join(candidate, "meta", "_journal.json"))
   );
-  if (!found)
+  if (!found) {
     throw new Error(
       `Drizzle migrations folder not found (looked in ${candidates.join(", ")})`
     );
+  }
   return found;
 }
 

@@ -16,7 +16,9 @@ export async function recordBatch(
   } | null = null;
   if (automation.webhookUrl) {
     const project = await projectsRepository.getProject(automation.projectId);
-    if (!project) return;
+    if (!project) {
+      return;
+    }
     const scrub = await projectSecretScrubber(project.id);
     const name = scrub(project.name)
       .replace(/&/g, "&amp;")
@@ -48,5 +50,7 @@ export async function recordBatch(
 
 export async function recordScheduledBatch(batch: RunBatch): Promise<void> {
   const automation = await schedulesRepository.get(batch.projectId);
-  if (automation) await recordBatch(automation, batch);
+  if (automation) {
+    await recordBatch(automation, batch);
+  }
 }

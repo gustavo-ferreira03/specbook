@@ -97,9 +97,10 @@ function retireConnection(
 }
 
 export function closeRunnerTunnels(runnerId: string): void {
-  for (const connection of connections.values())
+  for (const connection of connections.values()) {
     if (connection.runnerId === runnerId)
       retireConnection(connection, 1008, "Runner token changed");
+  }
 }
 
 export async function configuredTunnel(
@@ -107,31 +108,35 @@ export async function configuredTunnel(
   projectId: string,
   selector: string
 ): Promise<TunnelConfig> {
-  if (runner.purpose !== "tunnel")
+  if (runner.purpose !== "tunnel") {
     throw new CodedError(
       "environment",
       "Use a token created for tunneling, restricted to this environment's runner group"
     );
+  }
   const projects = runner.projectIds;
-  if (projects && !projects.includes(projectId))
+  if (projects && !projects.includes(projectId)) {
     throw new CodedError(
       "environment",
       "This runner token is not allowed to access this project"
     );
+  }
   const environment = (await environmentsRepository.list(projectId)).find(
     (row) =>
       row.id === selector || row.name.toLowerCase() === selector.toLowerCase()
   );
-  if (!environment || String(environment.executor) !== "tunnel")
+  if (!environment || String(environment.executor) !== "tunnel") {
     throw new CodedError(
       "environment",
       "Choose an environment configured for server execution through a tunnel"
     );
-  if (!environment.runnerGroup || runner.group !== environment.runnerGroup)
+  }
+  if (!environment.runnerGroup || runner.group !== environment.runnerGroup) {
     throw new CodedError(
       "environment",
       "Use a runner token restricted to this environment's runner group"
     );
+  }
   return tunnelConfigSchema.parse({
     environment: {
       id: environment.id,
@@ -151,7 +156,9 @@ export async function configuredTunnel(
 
 async function currentConnection(connection: Connection): Promise<boolean> {
   const runner = await runnersRepository.get(connection.runnerId);
-  if (!runner || runner.tokenHash !== connection.tokenHash) return false;
+  if (!runner || runner.tokenHash !== connection.tokenHash) {
+    return false;
+  }
   try {
     const current = await configuredTunnel(
       runner,
@@ -165,7 +172,9 @@ async function currentConnection(connection: Connection): Promise<boolean> {
       current.environment.group === previous.environment.group &&
       JSON.stringify([...current.origins].sort()) ===
         JSON.stringify([...previous.origins].sort());
-    if (matching) connection.config = current;
+    if (matching) {
+      connection.config = current;
+    }
     return matching;
   } catch {
     return false;
@@ -175,11 +184,12 @@ async function currentConnection(connection: Connection): Promise<boolean> {
 export async function createEnvironmentTunnelProxy(
   environment: RunEnvironment
 ) {
-  if (!hasTunnel(environment.id))
+  if (!hasTunnel(environment.id)) {
     throw new CodedError(
       "environment",
       `No tunnel connected in group ${environment.runnerGroup ?? "(unset)"}. Start specbook tunnel inside the private network.`
     );
+  }
   return createRunProxy(
     environment.allowedOrigins,
     undefined,
@@ -220,14 +230,17 @@ export async function waitForTunnel(
   signal.throwIfAborted();
   const deadline = Date.parse(queuedAt) + tunnelQueueTimeoutMs();
   const checkDeadline = () => {
-    if (Date.now() >= deadline)
+    if (Date.now() >= deadline) {
       throw new CodedError(
         "environment",
         `Tunnel work expired after waiting ${Math.round(tunnelQueueTimeoutMs() / 1000)}s. No tunnel connected in group ${environment.runnerGroup ?? "(unset)"}. Start specbook tunnel inside the private network and run the Spec again.`
       );
+    }
   };
   checkDeadline();
-  if (hasTunnel(environment.id)) return;
+  if (hasTunnel(environment.id)) {
+    return;
+  }
   const id = crypto.randomUUID();
   waiting.set(id, { environment, projectId, runIds, queuedAt });
   try {
@@ -245,7 +258,9 @@ export async function waitForTunnel(
           Math.max(1, Math.min(500, deadline - Date.now()))
         );
         signal?.addEventListener("abort", done, { once: true });
-        if (signal?.aborted) done();
+        if (signal?.aborted) {
+          done();
+        }
       });
     }
     signal?.throwIfAborted();
@@ -261,12 +276,13 @@ export function pendingTunnelRunIds(): string[] {
 
 export async function tunnelQueueEntries(): Promise<RunnerQueueEntry[]> {
   const groups = new Map<string, Waiting[]>();
-  for (const entry of waiting.values())
+  for (const entry of waiting.values()) {
     if (entry.runIds.length)
       groups.set(entry.environment.id, [
         ...(groups.get(entry.environment.id) ?? []),
         entry,
       ]);
+  }
   return Promise.all(
     [...groups.values()].map(async (entries) => {
       const first = entries[0]!;
@@ -298,22 +314,29 @@ export function attachTunnelWebSockets(
   server: Server,
   hostAllowlist: HostAllowlist
 ): () => void {
-  if (shutdown.signal.aborted) shutdown = new AbortController();
+  if (shutdown.signal.aborted) {
+    shutdown = new AbortController();
+  }
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: 65_536,
     perMessageDeflate: false,
   });
   const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (request.url?.split("?")[0] !== "/runner/tunnel") return;
+    if (request.url?.split("?")[0] !== "/runner/tunnel") {
+      return;
+    }
     let reservedEnvironment: string | undefined;
     let pendingInstance: { runnerId: string; id: string } | undefined;
     socket.once("close", () => {
-      if (reservedEnvironment) connecting.delete(reservedEnvironment);
-      if (pendingInstance)
+      if (reservedEnvironment) {
+        connecting.delete(reservedEnvironment);
+      }
+      if (pendingInstance) {
         void runnersRepository
           .disconnect(pendingInstance.runnerId, pendingInstance.id)
           .catch(() => undefined);
+      }
     });
     const reject = (status: number, message: string) => {
       const title =
@@ -370,7 +393,9 @@ export function attachTunnelWebSockets(
         return;
       }
       const environmentId = config.environment.id;
-      if (socket.destroyed || socket.readableEnded) return;
+      if (socket.destroyed || socket.readableEnded) {
+        return;
+      }
       if (hasTunnel(environmentId) || connecting.has(environmentId)) {
         reject(409, "A tunnel is already connected for this environment");
         return;
@@ -434,23 +459,26 @@ export function attachTunnelWebSockets(
           websocket.ping();
           void currentConnection(connection)
             .then(async (current) => {
-              if (!current)
+              if (!current) {
                 retireConnection(
                   connection,
                   1008,
                   "Runner token or tunnel configuration changed"
                 );
-              else if (websocket.readyState === 1) {
+              } else if (websocket.readyState === 1) {
                 await runnersRepository.touch(runner.id);
-                if (websocket.readyState !== 1) return;
+                if (websocket.readyState !== 1) {
+                  return;
+                }
                 await runnersRepository.reportInstance(
                   runner.id,
                   instanceId,
                   versions,
                   "tunnel"
                 );
-                if (websocket.readyState !== 1)
+                if (websocket.readyState !== 1) {
                   await runnersRepository.disconnect(runner.id, instanceId);
+                }
               }
             })
             .catch(() =>
@@ -461,15 +489,18 @@ export function attachTunnelWebSockets(
         websocket.on("error", () => undefined);
         websocket.once("close", () => {
           clearInterval(monitor);
-          if (connections.get(environmentId) === connection)
+          if (connections.get(environmentId) === connection) {
             connections.delete(environmentId);
+          }
           void runnersRepository
             .disconnect(runner.id, instanceId)
             .catch(() => undefined);
         });
       });
     })().catch(() => {
-      if (reservedEnvironment) connecting.delete(reservedEnvironment);
+      if (reservedEnvironment) {
+        connecting.delete(reservedEnvironment);
+      }
       reject(403, "Could not open tunnel");
     });
   };
@@ -477,7 +508,9 @@ export function attachTunnelWebSockets(
   return () => {
     stopTunnelWaits();
     server.off("upgrade", upgrade);
-    for (const websocket of wss.clients) websocket.terminate();
+    for (const websocket of wss.clients) {
+      websocket.terminate();
+    }
     wss.close();
   };
 }

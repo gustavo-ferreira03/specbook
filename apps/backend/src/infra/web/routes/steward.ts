@@ -40,8 +40,9 @@ const taskSchema = z
 export function createStewardRouter(): Hono {
   const router = new Hono();
   const check = async (id: string) => {
-    if (!(await projectsRepository.getProject(id)))
+    if (!(await projectsRepository.getProject(id))) {
       throw new HTTPException(404, { message: "Project not found" });
+    }
   };
   router.get("/projects/:id/steward", access("viewer"), async (c) => {
     const id = c.req.param("id");
@@ -67,10 +68,14 @@ export function createStewardRouter(): Hono {
         previous.autonomy === "observe" &&
         patch.autonomy &&
         patch.autonomy !== "observe"
-      )
+      ) {
         await resumeCurrentSignals(id);
-      if (patch.paused === true) await pauseAgentJobs(id);
-      else if (patch.paused === false) await resumeAgentJobs(id);
+      }
+      if (patch.paused === true) {
+        await pauseAgentJobs(id);
+      } else if (patch.paused === false) {
+        await resumeAgentJobs(id);
+      }
       const row = await stewardRepository.get(id);
       return c.json({
         autonomy: row.autonomy,

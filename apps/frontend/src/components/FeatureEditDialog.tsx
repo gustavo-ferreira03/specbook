@@ -41,9 +41,13 @@ export function FeatureEditDialog({
   }
 
   function changeOpen(nextOpen: boolean) {
-    if (saving) return;
+    if (saving) {
+      return;
+    }
     setOpen(nextOpen);
-    if (!nextOpen) setError("");
+    if (!nextOpen) {
+      setError("");
+    }
   }
 
   async function save() {

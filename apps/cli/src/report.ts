@@ -20,9 +20,12 @@ export async function generateReport(
     .map((entry) => entry.name)
     .sort();
   const id = selector ?? ids.at(-1);
-  if (!id) throw new Error("No local runs found");
-  if (id.includes("/") || id.includes("\\") || id === "." || id === "..")
+  if (!id) {
+    throw new Error("No local runs found");
+  }
+  if (id.includes("/") || id.includes("\\") || id === "." || id === "..") {
     throw new Error("Use a local run ID");
+  }
   const run = JSON.parse(
     await fs.readFile(
       await safeWorkspacePath(workspace, `runs/${id}/run.json`),
@@ -41,8 +44,9 @@ export async function generateReport(
     );
     for (const entry of await fs.readdir(evidenceDirectory, {
       recursive: true,
-    }))
+    })) {
       await safeWorkspacePath(workspace, `${relative}/${entry}`);
+    }
     sections.push(
       await prepareReportSection({
         item: { ...item, runId: item.path },

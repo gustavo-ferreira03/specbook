@@ -100,11 +100,16 @@ function spawnUntilReady(
     let settled = false;
     let outputText = "";
     const finish = (error?: Error, value?: number) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       clearTimeout(timer);
-      if (error) reject(error);
-      else resolve(value!);
+      if (error) {
+        reject(error);
+      } else {
+        resolve(value!);
+      }
     };
     const timer = setTimeout(
       () => finish(new Error(`${cmd} did not become ready: ${stderr.trim()}`)),
@@ -113,7 +118,9 @@ function spawnUntilReady(
     proc.stdio[output]?.on("data", (chunk: Buffer) => {
       outputText = (outputText + chunk.toString()).slice(-4000);
       const match = pattern.exec(outputText);
-      if (match) finish(undefined, Number.parseInt(match[1], 10));
+      if (match) {
+        finish(undefined, Number.parseInt(match[1], 10));
+      }
     });
     proc.once("error", (error) => finish(error));
     proc.once("exit", (code, signal) =>
@@ -124,7 +131,9 @@ function spawnUntilReady(
       )
     );
   });
-  if (output !== 1) proc.stdout?.resume();
+  if (output !== 1) {
+    proc.stdout?.resume();
+  }
   return { proc, ready };
 }
 
@@ -139,14 +148,20 @@ function hasStopped(proc: ChildProcess): boolean {
 }
 
 async function stopProcess(proc: ChildProcess | null): Promise<void> {
-  if (!proc || hasStopped(proc)) return;
+  if (!proc || hasStopped(proc)) {
+    return;
+  }
   proc.stdin?.end();
   proc.kill("SIGTERM");
-  for (let attempt = 0; attempt < 80 && !hasStopped(proc); attempt += 1)
+  for (let attempt = 0; attempt < 80 && !hasStopped(proc); attempt += 1) {
     await sleep(25);
-  if (!hasStopped(proc)) proc.kill("SIGKILL");
-  for (let attempt = 0; attempt < 40 && !hasStopped(proc); attempt += 1)
+  }
+  if (!hasStopped(proc)) {
+    proc.kill("SIGKILL");
+  }
+  for (let attempt = 0; attempt < 40 && !hasStopped(proc); attempt += 1) {
     await sleep(25);
+  }
 }
 
 async function stopRecord(record: VncSessionRecord): Promise<void> {
@@ -175,7 +190,9 @@ function publicSession(record: VncSessionRecord): VncSession {
 
 function monitorSession(record: VncSessionRecord): void {
   const stop = () => {
-    if (sessions.get(record.id) === record) void stopVncStack(record.id);
+    if (sessions.get(record.id) === record) {
+      void stopVncStack(record.id);
+    }
   };
   record.xvfbProc.once("error", stop);
   record.xvfbProc.once("exit", stop);
@@ -206,7 +223,9 @@ async function startDisplay(): Promise<{
         )
       )
     );
-    if (occupied.some(Boolean)) continue;
+    if (occupied.some(Boolean)) {
+      continue;
+    }
     const xvfb = spawnUntilReady(
       "Xvfb",
       [
@@ -232,8 +251,9 @@ async function startDisplay(): Promise<{
         !/already active|already in use|Cannot establish any listening sockets/.test(
           error.message
         )
-      )
+      ) {
         throw error;
+      }
     }
   }
   throw new Error("No free browser display could be allocated");
@@ -288,26 +308,34 @@ export async function startVncStack(): Promise<VncSession> {
     };
     monitorSession(record);
     sessions.set(record.id, record);
-    if (hasStopped(xvfbProc) || hasStopped(x11vncProc))
+    if (hasStopped(xvfbProc) || hasStopped(x11vncProc)) {
       throw new Error("The browser display stopped during startup");
+    }
     return publicSession(record);
   } catch (error) {
-    if (record) sessions.delete(record.id);
+    if (record) {
+      sessions.delete(record.id);
+    }
     await stopProcess(x11vncProc);
     await stopProcess(xvfbProc);
-    if (passwordDir)
+    if (passwordDir) {
       await fs
         .rm(passwordDir, { recursive: true, force: true })
         .catch(() => undefined);
+    }
     throw new BrowserUnavailableError(error);
   }
 }
 
 export async function stopVncStack(id: string): Promise<void> {
   const previous = closing.get(id);
-  if (previous) return previous;
+  if (previous) {
+    return previous;
+  }
   const record = sessions.get(id);
-  if (!record) return;
+  if (!record) {
+    return;
+  }
   sessions.delete(id);
   const task = stopRecord(record);
   closing.set(id, task);
@@ -346,7 +374,9 @@ class ByteQueue {
   }
 
   read(size: number): Promise<Buffer> {
-    if (this.failure) return Promise.reject(this.failure);
+    if (this.failure) {
+      return Promise.reject(this.failure);
+    }
     return new Promise((resolve, reject) => {
       this.waiter = { size, resolve, reject };
       this.flush();
@@ -361,7 +391,9 @@ class ByteQueue {
   }
 
   private flush(): void {
-    if (!this.waiter || this.size < this.waiter.size) return;
+    if (!this.waiter || this.size < this.waiter.size) {
+      return;
+    }
     const all = Buffer.concat(this.chunks);
     const { size, resolve } = this.waiter;
     this.waiter = null;
@@ -373,7 +405,9 @@ class ByteQueue {
 
 function parseRfbVersion(raw: Buffer): { major: number; minor: number } {
   const match = /^RFB (\d{3})\.(\d{3})\n$/.exec(raw.toString("latin1"));
-  if (!match) throw new Error("Invalid RFB protocol version");
+  if (!match) {
+    throw new Error("Invalid RFB protocol version");
+  }
   return { major: Number(match[1]), minor: Number(match[2]) };
 }
 
@@ -384,16 +418,18 @@ async function readReason(queue: ByteQueue): Promise<string> {
 
 function reverseBits(byte: number): number {
   let result = 0;
-  for (let bit = 0; bit < 8; bit += 1)
+  for (let bit = 0; bit < 8; bit += 1) {
     result |= ((byte >> bit) & 1) << (7 - bit);
+  }
   return result;
 }
 
 function vncAuthResponse(password: string, challenge: Buffer): Buffer {
   const key = Buffer.alloc(8);
   Buffer.from(password, "latin1").copy(key, 0, 0, 8);
-  for (let index = 0; index < key.length; index += 1)
+  for (let index = 0; index < key.length; index += 1) {
     key[index] = reverseBits(key[index]);
+  }
   const cipher = crypto.createCipheriv(
     "des-ede3-ecb",
     Buffer.concat([key, key, key]),
@@ -409,34 +445,42 @@ async function authenticateUpstream(
   password: string
 ): Promise<void> {
   const server = parseRfbVersion(await queue.read(12));
-  if (server.major !== 3 || server.minor < 3)
+  if (server.major !== 3 || server.minor < 3) {
     throw new Error("Unsupported RFB server version");
+  }
   const minor = server.minor >= 8 ? 8 : server.minor >= 7 ? 7 : 3;
   socket.write(`RFB 003.00${minor}\n`);
   let type: number;
   if (minor >= 7) {
     const count = (await queue.read(1))[0];
-    if (count === 0)
+    if (count === 0) {
       throw new Error(
         `VNC server refused the connection: ${await readReason(queue)}`
       );
+    }
     const types = [...(await queue.read(count))];
-    if (types.includes(RFB_SECURITY_VNC_AUTH)) type = RFB_SECURITY_VNC_AUTH;
-    else if (types.includes(RFB_SECURITY_NONE)) type = RFB_SECURITY_NONE;
-    else throw new Error("VNC server offers no supported security type");
+    if (types.includes(RFB_SECURITY_VNC_AUTH)) {
+      type = RFB_SECURITY_VNC_AUTH;
+    } else if (types.includes(RFB_SECURITY_NONE)) {
+      type = RFB_SECURITY_NONE;
+    } else {
+      throw new Error("VNC server offers no supported security type");
+    }
     socket.write(Buffer.from([type]));
   } else {
     type = (await queue.read(4)).readUInt32BE(0);
-    if (type === 0)
+    if (type === 0) {
       throw new Error(
         `VNC server refused the connection: ${await readReason(queue)}`
       );
+    }
     if (type !== RFB_SECURITY_NONE && type !== RFB_SECURITY_VNC_AUTH) {
       throw new Error("VNC server offers no supported security type");
     }
   }
-  if (type === RFB_SECURITY_VNC_AUTH)
+  if (type === RFB_SECURITY_VNC_AUTH) {
     socket.write(vncAuthResponse(password, await queue.read(16)));
+  }
   if (type === RFB_SECURITY_VNC_AUTH || minor >= 8) {
     const result = (await queue.read(4)).readUInt32BE(0);
     if (result !== 0) {
@@ -454,13 +498,18 @@ async function acceptDownstream(
 ): Promise<void> {
   websocket.send(Buffer.from("RFB 003.008\n", "latin1"));
   const client = parseRfbVersion(await queue.read(12));
-  if (client.major !== 3) throw new Error("Unsupported RFB client version");
+  if (client.major !== 3) {
+    throw new Error("Unsupported RFB client version");
+  }
   if (client.minor >= 7) {
     websocket.send(Buffer.from([1, RFB_SECURITY_NONE]));
     const choice = (await queue.read(1))[0];
-    if (choice !== RFB_SECURITY_NONE)
+    if (choice !== RFB_SECURITY_NONE) {
       throw new Error("VNC client chose an unsupported security type");
-    if (client.minor >= 8) websocket.send(Buffer.alloc(4));
+    }
+    if (client.minor >= 8) {
+      websocket.send(Buffer.alloc(4));
+    }
   } else {
     const type = Buffer.alloc(4);
     type.writeUInt32BE(RFB_SECURITY_NONE, 0);
@@ -469,7 +518,9 @@ async function acceptDownstream(
 }
 
 function toBuffer(data: Buffer | ArrayBuffer | Buffer[]): Buffer {
-  if (Array.isArray(data)) return Buffer.concat(data);
+  if (Array.isArray(data)) {
+    return Buffer.concat(data);
+  }
   return Buffer.isBuffer(data) ? data : Buffer.from(data);
 }
 
@@ -477,7 +528,9 @@ export async function proxyVncSession(
   id: string,
   websocket: WebSocket
 ): Promise<void> {
-  if (websocket.readyState !== websocket.OPEN) return;
+  if (websocket.readyState !== websocket.OPEN) {
+    return;
+  }
   const record = sessions.get(id);
   if (!record) {
     websocket.close(1008, "Unknown VNC session");
@@ -502,8 +555,11 @@ export async function proxyVncSession(
     closeWebSocket();
   };
   upstream.on("data", (data: Buffer) => {
-    if (!piping) upstreamQueue.push(data);
-    else if (websocket.readyState === websocket.OPEN) websocket.send(data);
+    if (!piping) {
+      upstreamQueue.push(data);
+    } else if (websocket.readyState === websocket.OPEN) {
+      websocket.send(data);
+    }
   });
   upstream.on("close", () => {
     upstreamQueue.fail(new Error("VNC server closed the connection"));
@@ -515,8 +571,11 @@ export async function proxyVncSession(
   });
   websocket.on("message", (data) => {
     const chunk = toBuffer(data as Buffer | ArrayBuffer | Buffer[]);
-    if (!piping) downstreamQueue.push(chunk);
-    else if (upstream.writable) upstream.write(chunk);
+    if (!piping) {
+      downstreamQueue.push(chunk);
+    } else if (upstream.writable) {
+      upstream.write(chunk);
+    }
   });
   websocket.on("close", () => {
     downstreamQueue.fail(new Error("Browser closed the connection"));
@@ -544,7 +603,10 @@ export async function proxyVncSession(
   piping = true;
   const pendingUpstream = upstreamQueue.drain();
   const pendingDownstream = downstreamQueue.drain();
-  if (pendingDownstream.length > 0) upstream.write(pendingDownstream);
-  if (pendingUpstream.length > 0 && websocket.readyState === websocket.OPEN)
+  if (pendingDownstream.length > 0) {
+    upstream.write(pendingDownstream);
+  }
+  if (pendingUpstream.length > 0 && websocket.readyState === websocket.OPEN) {
     websocket.send(pendingUpstream);
+  }
 }

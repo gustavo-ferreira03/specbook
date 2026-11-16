@@ -49,20 +49,27 @@ export function minimalChildEnv(
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value === undefined) continue;
+    if (value === undefined) {
+      continue;
+    }
     if (
       ENV_ALLOWLIST.has(key) ||
       ENV_PREFIX_ALLOWLIST.some((prefix) => key.startsWith(prefix))
-    )
+    ) {
       env[key] = value;
+    }
   }
   const nodeDir = path.dirname(process.execPath);
   const entries = (env.PATH ?? "").split(path.delimiter).filter(Boolean);
-  if (!entries.includes(nodeDir))
+  if (!entries.includes(nodeDir)) {
     env.PATH = [nodeDir, ...entries].join(path.delimiter);
+  }
   for (const [key, value] of Object.entries(extra)) {
-    if (value === undefined) delete env[key];
-    else env[key] = value;
+    if (value === undefined) {
+      delete env[key];
+    } else {
+      env[key] = value;
+    }
   }
   return env;
 }
@@ -80,7 +87,9 @@ export function terminateProcessTree(proc: ChildProcess): void {
 }
 
 export function stopActiveProcesses(): void {
-  for (const proc of activeProcesses) terminateProcessTree(proc);
+  for (const proc of activeProcesses) {
+    terminateProcessTree(proc);
+  }
 }
 
 export function runNodeCli(
@@ -106,12 +115,15 @@ export function runNodeCli(
     let settled = false;
     const append = (data: Buffer) => {
       output += data.toString();
-      if (output.length > MAX_OUTPUT_CHARS * 2)
+      if (output.length > MAX_OUTPUT_CHARS * 2) {
         output = output.slice(-MAX_OUTPUT_CHARS);
+      }
     };
     const collected = () => output.slice(-MAX_OUTPUT_CHARS);
     const finish = (result: ProcessResult) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
@@ -123,12 +135,16 @@ export function runNodeCli(
     }, options.timeoutMs);
     const abort = () => terminateProcessTree(proc);
     options.signal?.addEventListener("abort", abort, { once: true });
-    if (options.signal?.aborted) abort();
+    if (options.signal?.aborted) {
+      abort();
+    }
     proc.stdout.on("data", append);
     proc.stderr.on("data", append);
     proc.once("error", (error) => {
       activeProcesses.delete(proc);
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
@@ -167,14 +183,18 @@ export async function withRunSlot<T>(
         signal,
         abort: () => {
           const index = slotQueue.indexOf(waiter);
-          if (index < 0) return;
+          if (index < 0) {
+            return;
+          }
           slotQueue.splice(index, 1);
           reject(signal?.reason ?? new Error("Run cancelled"));
         },
       };
       slotQueue.push(waiter);
       signal?.addEventListener("abort", waiter.abort, { once: true });
-      if (signal?.aborted) waiter.abort();
+      if (signal?.aborted) {
+        waiter.abort();
+      }
     });
   } else {
     runningSlots += 1;
@@ -187,6 +207,8 @@ export async function withRunSlot<T>(
     if (next) {
       next.signal?.removeEventListener("abort", next.abort);
       next.resume();
-    } else runningSlots -= 1;
+    } else {
+      runningSlots -= 1;
+    }
   }
 }

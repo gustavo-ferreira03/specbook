@@ -25,10 +25,14 @@ export function SpecFolio({
     return () => controller.abort();
   }, [projectId]);
 
-  if (!tree) return null;
+  if (!tree) {
+    return null;
+  }
   const chapter = tree.specs.filter((spec) => spec.featureId === featureId);
   const index = chapter.findIndex((spec) => spec.id === specId);
-  if (index < 0) return null;
+  if (index < 0) {
+    return null;
+  }
   const feature = tree.features.find((item) => item.id === featureId);
   const previous = chapter[index - 1];
   const next = chapter[index + 1];

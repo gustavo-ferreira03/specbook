@@ -21,7 +21,9 @@ export function createCliRouter(
         "Content-Disposition": 'attachment; filename="specbook.tgz"',
       });
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
       return c.json(
         {
           error:

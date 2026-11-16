@@ -93,8 +93,9 @@ function requireProvider(
   modelRegistry: Awaited<typeof modelRegistryPromise>,
   modelRuntime: ModelRuntime
 ): void {
-  if (!providerIds(modelRegistry, modelRuntime).has(provider))
+  if (!providerIds(modelRegistry, modelRuntime).has(provider)) {
     throw new HTTPException(400, { message: "Unknown LLM provider" });
+  }
 }
 
 function requireOAuthProvider(
@@ -111,15 +112,21 @@ function requireOAuthProvider(
 
 function removeOAuthSession(id: string, abort: boolean): void {
   const session = oauthSessions.get(id);
-  if (!session) return;
+  if (!session) {
+    return;
+  }
   clearTimeout(session.timeout);
   oauthSessions.delete(id);
-  if (abort) session.controller.abort();
+  if (abort) {
+    session.controller.abort();
+  }
 }
 
 function removeProviderOAuthSessions(provider: string): void {
   for (const [id, session] of oauthSessions) {
-    if (session.provider === provider) removeOAuthSession(id, true);
+    if (session.provider === provider) {
+      removeOAuthSession(id, true);
+    }
   }
 }
 
@@ -144,7 +151,9 @@ function createOAuthSession(provider: string): [string, OAuthSession] {
 
 function updateOAuthSession(id: string, update: Partial<OAuthSession>): void {
   const session = oauthSessions.get(id);
-  if (!session) return;
+  if (!session) {
+    return;
+  }
   Object.assign(session, update);
 }
 
@@ -154,7 +163,9 @@ function finishOAuthSession(
   error?: string
 ): void {
   const session = oauthSessions.get(id);
-  if (!session) return;
+  if (!session) {
+    return;
+  }
   clearTimeout(session.timeout);
   session.controller.abort();
   session.status = status;
@@ -170,7 +181,9 @@ function finishOAuthSession(
 
 async function saveOAuthCredentials(id: string): Promise<void> {
   const session = oauthSessions.get(id);
-  if (!session) return;
+  if (!session) {
+    return;
+  }
   finishOAuthSession(id, "done");
   discoverPendingProjectContexts();
 }
@@ -224,7 +237,9 @@ function publicOAuthPrompt(prompt: AuthPrompt): OAuthPrompt {
 }
 
 function handleOAuthEvent(id: string, event: AuthEvent): void {
-  if (event.type === "auth_url") updateOAuthSession(id, { url: event.url });
+  if (event.type === "auth_url") {
+    updateOAuthSession(id, { url: event.url });
+  }
   if (event.type === "device_code") {
     updateOAuthSession(id, {
       userCode: event.userCode,
@@ -298,10 +313,14 @@ function listProviders(
       };
     })
     .sort((left, right) => {
-      if (left.configured !== right.configured) return left.configured ? -1 : 1;
+      if (left.configured !== right.configured) {
+        return left.configured ? -1 : 1;
+      }
       const leftOAuth = left.authMethods.includes("oauth");
       const rightOAuth = right.authMethods.includes("oauth");
-      if (leftOAuth !== rightOAuth) return leftOAuth ? -1 : 1;
+      if (leftOAuth !== rightOAuth) {
+        return leftOAuth ? -1 : 1;
+      }
       return left.name.localeCompare(right.name);
     });
 }
@@ -362,11 +381,15 @@ export function createSettingsRouter(): Hono {
     const body = agentSettingsSchema.safeParse(
       await c.req.json().catch(() => null)
     );
-    if (!body.success)
+    if (!body.success) {
       throw new HTTPException(400, { message: "Provide a valid pause state" });
+    }
     const paused = await settingsRepository.setAgentPaused(body.data.paused);
-    if (paused) await pauseAgentJobs();
-    else await resumeAgentJobs();
+    if (paused) {
+      await pauseAgentJobs();
+    } else {
+      await resumeAgentJobs();
+    }
     return c.json({ paused });
   });
 
@@ -401,8 +424,9 @@ export function createSettingsRouter(): Hono {
       modelRuntimePromise,
     ]);
     const body = llmPatchSchema.safeParse(await c.req.json().catch(() => null));
-    if (!body.success)
+    if (!body.success) {
       throw new HTTPException(400, { message: "Invalid LLM settings" });
+    }
     const current = await settingsRepository.getLlmSettings();
     const updated = { ...current, ...body.data };
     if (!updated.provider && !updated.model) {
@@ -430,8 +454,9 @@ export function createSettingsRouter(): Hono {
       const provider = c.req.param("provider");
       requireProvider(provider, modelRegistry, modelRuntime);
       const body = apiKeySchema.safeParse(await c.req.json().catch(() => null));
-      if (!body.success)
+      if (!body.success) {
         throw new HTTPException(400, { message: "apiKey is required" });
+      }
       removeProviderOAuthSessions(provider);
       await llmCredentials.modify(provider, async () => ({
         type: "api_key",
@@ -496,10 +521,11 @@ export function createSettingsRouter(): Hono {
       const body = oauthInputSchema.safeParse(
         await c.req.json().catch(() => null)
       );
-      if (!body.success)
+      if (!body.success) {
         throw new HTTPException(400, {
           message: "A valid OAuth session and input are required",
         });
+      }
       const session = oauthSessions.get(body.data.sessionId);
       if (
         !session ||
@@ -508,9 +534,11 @@ export function createSettingsRouter(): Hono {
       ) {
         throw new HTTPException(404, { message: "OAuth session not found" });
       }
-      if (session.resolvePromptInput)
+      if (session.resolvePromptInput) {
         session.resolvePromptInput(body.data.input);
-      else session.promptInput = body.data.input;
+      } else {
+        session.promptInput = body.data.input;
+      }
       return c.json({ ok: true });
     }
   );
@@ -524,8 +552,9 @@ export function createSettingsRouter(): Hono {
         await modelRuntimePromise
       );
       const sessionId = c.req.query("sessionId");
-      if (!sessionId)
+      if (!sessionId) {
         throw new HTTPException(400, { message: "Missing sessionId" });
+      }
       const session = oauthSessions.get(sessionId);
       if (!session || session.provider !== provider) {
         throw new HTTPException(404, { message: "OAuth session not found" });
@@ -540,7 +569,9 @@ export function createSettingsRouter(): Hono {
         ...(session.prompt ? { prompt: session.prompt } : {}),
         ...(session.error ? { error: session.error } : {}),
       };
-      if (session.status !== "pending") removeOAuthSession(sessionId, false);
+      if (session.status !== "pending") {
+        removeOAuthSession(sessionId, false);
+      }
       return c.json(response);
     }
   );

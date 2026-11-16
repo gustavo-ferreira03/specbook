@@ -140,11 +140,12 @@ describe("security middleware", () => {
       runnerCompleteRequestSchema.safeParse(completion(large)).success,
       true
     );
-    for (const content of ["", "AAAA", "AA==", "AAA="])
+    for (const content of ["", "AAAA", "AA==", "AAA="]) {
       assert.equal(
         runnerCompleteRequestSchema.safeParse(completion(content)).success,
         true
       );
+    }
     for (const content of [
       "A",
       "AAAA=",

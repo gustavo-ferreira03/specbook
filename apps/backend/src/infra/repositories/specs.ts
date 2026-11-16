@@ -131,7 +131,9 @@ class SpecsRepository {
   }
 
   deleteSpecsQueries(ids: string[]): DbQuery[] {
-    if (ids.length === 0) return [];
+    if (ids.length === 0) {
+      return [];
+    }
     return [
       db.delete(runs).where(inArray(runs.specId, ids)),
       db.delete(specs).where(inArray(specs.id, ids)),
@@ -143,13 +145,16 @@ class SpecsRepository {
       .select({ id: specs.id })
       .from(specs)
       .where(eq(specs.id, id));
-    if (specRows.length === 0) return { status: "not_found" };
+    if (specRows.length === 0) {
+      return { status: "not_found" };
+    }
     const runRows = await db
       .select({ id: runs.id, status: runs.status })
       .from(runs)
       .where(eq(runs.specId, id));
-    if (runRows.some((run) => run.status === "running"))
+    if (runRows.some((run) => run.status === "running")) {
       return { status: "busy" };
+    }
     await runBatch(this.deleteSpecsQueries([id]));
     return { status: "deleted", runIds: runRows.map((run) => run.id) };
   }

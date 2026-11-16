@@ -90,9 +90,10 @@ function fakePage(
       {},
       {
         get(_target, property: string) {
-          if (property === "evaluate")
+          if (property === "evaluate") {
             return async (callback: (node: unknown) => unknown) =>
               callback(element(description));
+          }
           if (property === "elementHandle") {
             return async () => ({
               ownerFrame: async () =>
@@ -134,8 +135,11 @@ function fakePage(
       try {
         return callback();
       } finally {
-        if (document) Object.defineProperty(globalThis, "document", document);
-        else Reflect.deleteProperty(globalThis, "document");
+        if (document) {
+          Object.defineProperty(globalThis, "document", document);
+        } else {
+          Reflect.deleteProperty(globalThis, "document");
+        }
       }
     },
     goto: async (...args: unknown[]) => {
@@ -613,9 +617,11 @@ describe("run cancellation", () => {
       } finally {
         release();
         await held;
-        if (previous === undefined)
+        if (previous === undefined) {
           delete process.env.SPECBOOK_MAX_CONCURRENT_RUNS;
-        else process.env.SPECBOOK_MAX_CONCURRENT_RUNS = previous;
+        } else {
+          process.env.SPECBOOK_MAX_CONCURRENT_RUNS = previous;
+        }
       }
     }
   );

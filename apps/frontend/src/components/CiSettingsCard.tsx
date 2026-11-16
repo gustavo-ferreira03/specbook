@@ -141,9 +141,13 @@ export function CiSettingsCard({
         setSettings(result);
         setError("");
       } catch (caught) {
-        if (!isAbortError(caught)) setError(errorMessage(caught));
+        if (!isAbortError(caught)) {
+          setError(errorMessage(caught));
+        }
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(load, 15_000);
+        if (!controller.signal.aborted) {
+          timer = setTimeout(load, 15_000);
+        }
       }
     }
     void load();
@@ -212,8 +216,11 @@ export function CiSettingsCard({
             : "CI token created."
       );
     } catch (caught) {
-      if (action === "create") setError(errorMessage(caught));
-      else setConfirmError(errorMessage(caught));
+      if (action === "create") {
+        setError(errorMessage(caught));
+      } else {
+        setConfirmError(errorMessage(caught));
+      }
     } finally {
       setBusy(false);
     }
@@ -225,7 +232,7 @@ export function CiSettingsCard({
     setConfirmation(action);
   }
 
-  if (!settings && !error)
+  if (!settings && !error) {
     return (
       <section
         aria-label="Loading CI/CD settings"
@@ -237,8 +244,9 @@ export function CiSettingsCard({
         <Skeleton className="h-24 w-full rounded-xl" />
       </section>
     );
+  }
 
-  if (!settings)
+  if (!settings) {
     return (
       <Alert variant="danger" role="alert">
         <AlertTitle>CI/CD settings could not load</AlertTitle>
@@ -256,6 +264,7 @@ export function CiSettingsCard({
         </AlertDescription>
       </Alert>
     );
+  }
 
   return (
     <div className="space-y-10">

@@ -45,11 +45,12 @@ export async function providerProfile(
   profile: string,
   signal?: AbortSignal
 ): Promise<ProviderProfile> {
-  if (!command.trim() || command.length > 16_384)
+  if (!command.trim() || command.length > 16_384) {
     throw new CodedError(
       "credentials",
       "Provide a nonempty secret provider command"
     );
+  }
   z.string().regex(SECRET_NAME_PATTERN).parse(profile);
   signal?.throwIfAborted();
   let data = "";
@@ -74,7 +75,9 @@ export async function providerProfile(
       } catch {
         /* The command may have already exited. */
       }
-    } else child.kill("SIGKILL");
+    } else {
+      child.kill("SIGKILL");
+    }
   };
   const timer = setTimeout(() => {
     timedOut = true;
@@ -82,10 +85,14 @@ export async function providerProfile(
   }, 30_000);
   const abort = () => kill();
   signal?.addEventListener("abort", abort, { once: true });
-  if (signal?.aborted) abort();
+  if (signal?.aborted) {
+    abort();
+  }
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
-    if (tooLarge) return;
+    if (tooLarge) {
+      return;
+    }
     data += chunk;
     if (Buffer.byteLength(data) > 1_048_576) {
       tooLarge = true;
@@ -106,11 +113,12 @@ export async function providerProfile(
       child.once("close", resolve);
     });
     signal?.throwIfAborted();
-    if (timedOut || tooLarge || code !== 0)
+    if (timedOut || tooLarge || code !== 0) {
       throw new CodedError(
         "credentials",
         `Secret provider for profile "${profile}" ${timedOut ? "timed out" : tooLarge ? "returned too much data" : "failed"}; check the provider configuration`
       );
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(data);
@@ -121,13 +129,16 @@ export async function providerProfile(
       );
     }
     const scoped = profileSchema.safeParse(parsed);
-    if (scoped.success) return scoped.data;
+    if (scoped.success) {
+      return scoped.data;
+    }
     const fields = fieldsSchema.safeParse(parsed);
-    if (!fields.success)
+    if (!fields.success) {
       throw new CodedError(
         "credentials",
         `Secret provider for profile "${profile}" must print { fields, origins } or valid named, nonempty string fields`
       );
+    }
     return { fields: fields.data, origins: [] };
   } finally {
     clearTimeout(timer);

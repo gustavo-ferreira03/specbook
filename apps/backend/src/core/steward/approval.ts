@@ -16,16 +16,18 @@ import { fixProposalSchema } from "../jobs/schemas";
 import { provesExpectedResult } from "../runner/evidence-review";
 
 export function isLocatorOnlyFix(item: InboxItem): boolean {
-  if (item.kind !== "spec_fix" || !payloadOf(item).requiresVerification)
+  if (item.kind !== "spec_fix" || !payloadOf(item).requiresVerification) {
     return false;
+  }
   const patch = fixProposalSchema.safeParse(payloadOf(item).params);
   const before = payloadOf(item).before;
   if (
     !patch.success ||
     !isImplementationOnly(patch.data) ||
     typeof before?.testSource !== "string"
-  )
+  ) {
     return false;
+  }
   const normalize = (source: string) => {
     const ast = parse(source, {
       sourceType: "module",
@@ -37,8 +39,9 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
         call.callee?.type !== "MemberExpression" ||
         call.callee.computed ||
         !LOCATOR_ACTIONS.includes(call.callee.property?.name)
-      )
+      ) {
         return;
+      }
       const selectors: Record<string, any>[] = [];
       let target = call.callee.object;
       while (
@@ -47,25 +50,31 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
         !target.callee.computed
       ) {
         const method = target.callee.property?.name;
-        if (![...LOCATOR_FACTORIES, ...LOCATOR_REFINERS].includes(method))
+        if (![...LOCATOR_FACTORIES, ...LOCATOR_REFINERS].includes(method)) {
           return;
+        }
         if (
           ["locator", "getByLabel", "getByTestId", "getByPlaceholder"].includes(
             method
           ) &&
           target.arguments.length === 1 &&
           target.arguments[0]?.type === "StringLiteral"
-        )
+        ) {
           selectors.push(target.arguments[0]);
+        }
         target = target.callee.object;
       }
-      if (target?.type === "Identifier" && target.name === "page")
+      if (target?.type === "Identifier" && target.name === "page") {
         for (const selector of selectors) selector.value = "selector";
+      }
     };
     const visit = (node: unknown, inAssertion = false): unknown => {
-      if (Array.isArray(node))
+      if (Array.isArray(node)) {
         return node.map((value) => visit(value, inAssertion));
-      if (!node || typeof node !== "object") return node;
+      }
+      if (!node || typeof node !== "object") {
+        return node;
+      }
       const entry = node as Record<string, any>;
       const assertion =
         inAssertion ||
@@ -75,8 +84,9 @@ export function isLocatorOnlyFix(item: InboxItem): boolean {
             (entry.callee?.type === "MemberExpression" &&
               entry.callee.object?.type === "Identifier" &&
               entry.callee.object.name === "expect")));
-      if (entry.type === "AwaitExpression" && !assertion)
+      if (entry.type === "AwaitExpression" && !assertion) {
         normalizeAction(entry.argument);
+      }
       return Object.fromEntries(
         Object.entries(entry)
           .filter(
@@ -114,18 +124,24 @@ export async function isSelfApprovableRepair(
     item.kind !== "spec_fix" ||
     item.status !== "pending" ||
     !payloadOf(item).requiresVerification
-  )
+  ) {
     return false;
+  }
   const verification = verificationOf(item);
   if (
     verification?.status !== "passed" ||
     !provesExpectedResult(verification.review)
-  )
+  ) {
     return false;
+  }
   const patch = fixProposalSchema.safeParse(payloadOf(item).params);
-  if (!patch.success || !isImplementationOnly(patch.data)) return false;
+  if (!patch.success || !isImplementationOnly(patch.data)) {
+    return false;
+  }
   const job = await jobsRepository.get(item.jobId);
-  if (job?.kind === "regenerate") return true;
+  if (job?.kind === "regenerate") {
+    return true;
+  }
   return (
     job?.kind === "failure_triage" &&
     job.classification === "test_drift" &&
@@ -138,8 +154,9 @@ export async function applyVerifiedRepairs(projectId: string): Promise<void> {
   if (
     (await isAgentPaused(projectId)) ||
     (await stewardRepository.get(projectId)).autonomy === "observe"
-  )
+  ) {
     return;
+  }
   const pending = await jobsRepository.itemsByKind(projectId, "spec_fix", [
     "pending",
   ]);
@@ -149,7 +166,9 @@ export async function applyVerifiedRepairs(projectId: string): Promise<void> {
   )) {
     const specId = fixProposalSchema.safeParse(payloadOf(item).params).data
       ?.specId;
-    if (!specId) continue;
+    if (!specId) {
+      continue;
+    }
     if (!newestBySpec.has(specId)) {
       newestBySpec.set(specId, item);
       continue;
@@ -163,26 +182,29 @@ export async function applyVerifiedRepairs(projectId: string): Promise<void> {
     if (
       !(await isSelfApprovableRepair(item)) ||
       !(await jobsRepository.claimItem(item.id))
-    )
+    ) {
       continue;
+    }
     const job = await jobsRepository.get(item.jobId);
     try {
       const commitSha = await applyProposal(item, async () => {
-        if (await isAgentPaused(projectId))
+        if (await isAgentPaused(projectId)) {
           throw new Error("The agent was paused");
+        }
       });
       await jobsRepository.updateItem(item.id, {
         status: "approved",
         commitSha,
         payload: { ...item.payload, appliedBy: "agent" },
       });
-      if (job)
+      if (job) {
         await recordAgentMetric(job, "decision", {
           itemId: item.id,
           itemKind: item.kind,
           decision: "approve",
           actor: "agent",
         });
+      }
       await jobsRepository.log(
         item.jobId,
         "auto_approved",

@@ -41,12 +41,16 @@ export default function ChatsHome({
           setError("");
         })
         .catch((loadError) => {
-          if (!isAbortError(loadError)) setError(errorMessage(loadError));
+          if (!isAbortError(loadError)) {
+            setError(errorMessage(loadError));
+          }
         });
     };
     load();
     const stop = onInvalidate((event) => {
-      if (matchesInvalidation(event, "chats", projectId)) load();
+      if (matchesInvalidation(event, "chats", projectId)) {
+        load();
+      }
     });
     return () => {
       controller.abort();

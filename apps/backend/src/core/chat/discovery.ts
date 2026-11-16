@@ -79,8 +79,9 @@ export async function discoverProjectContext(
   projectId: string
 ): Promise<string | null> {
   try {
-    if (!(await configuredModel()).ready || (await isAgentPaused(projectId)))
+    if (!(await configuredModel()).ready || (await isAgentPaused(projectId))) {
       return null;
+    }
     return await projectContextsRepository.withProjectContextDraftLock(
       projectId,
       async () => {
@@ -88,10 +89,12 @@ export async function discoverProjectContext(
         if (
           !project ||
           (await projectContextsRepository.hasRevisions(projectId))
-        )
+        ) {
           return null;
-        if ((await resolveRunEnvironment(project.id)).executor === "runner")
+        }
+        if ((await resolveRunEnvironment(project.id)).executor === "runner") {
           return null;
+        }
         const brief = {
           goal: DEFAULT_DISCOVERY_GOAL,
           startUrl: project.baseUrl,
@@ -109,12 +112,18 @@ export async function discoverProjectContext(
 let pendingDiscovery: Promise<void> | null = null;
 
 export function discoverPendingProjectContexts(): void {
-  if (pendingDiscovery) return;
+  if (pendingDiscovery) {
+    return;
+  }
   pendingDiscovery = (async () => {
-    if (!(await configuredModel()).ready) return;
+    if (!(await configuredModel()).ready) {
+      return;
+    }
     for (const project of await projectsRepository.listProjects()) {
       const chatId = await discoverProjectContext(project.id);
-      if (chatId) await chatIdle(chatId);
+      if (chatId) {
+        await chatIdle(chatId);
+      }
     }
   })()
     .catch((error) => logger.error("automatic discovery failed", { error }))
@@ -128,13 +137,15 @@ async function chatIdle(
   timeoutMs = 30 * 60_000
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (isChatBusy(chatId) && Date.now() < deadline)
+  while (isChatBusy(chatId) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
 }
 
 export function contextProposalProblem(context: ProjectContext): string | null {
-  if (!context.summary.trim())
+  if (!context.summary.trim()) {
     return "Confirmation requires a non-empty summary";
+  }
   if (context.areas.length === 0 && context.unknowns.length === 0) {
     return "Confirmation requires at least one area or unknown";
   }
@@ -146,7 +157,9 @@ export async function confirmDiscoveredContext(
 ): Promise<void> {
   const initial =
     await projectContextsRepository.getProjectContextRevision(revisionId);
-  if (!initial) return;
+  if (!initial) {
+    return;
+  }
   await projectContextsRepository.withProjectContextDraftLock(
     initial.projectId,
     async () => {
@@ -155,8 +168,9 @@ export async function confirmDiscoveredContext(
       if (
         revision?.status !== "draft" ||
         contextProposalProblem(revision.context)
-      )
+      ) {
         return;
+      }
       await writeContextToRepo(revision.projectId, revision.context, {
         confirmRevisionId: revision.id,
       });

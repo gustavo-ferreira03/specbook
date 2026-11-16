@@ -69,8 +69,9 @@ export async function specHistory(spec: Spec): Promise<SpecHistoryEntry[]> {
       historyForPath(spec, specTestFile(spec.path)),
     ]);
     const unique = new Map<string, HistoryRecord>();
-    for (const entry of entries.flat())
+    for (const entry of entries.flat()) {
       if (!unique.has(entry.sha)) unique.set(entry.sha, entry);
+    }
     return [...unique.values()]
       .filter((entry) => entry.path !== null)
       .map(({ sha, date, message }) => ({ sha, date, message }))
@@ -84,7 +85,9 @@ async function pathAtCommit(spec: Spec, sha: string): Promise<string | null> {
     historyForPath(spec, specTestFile(spec.path)),
   ]);
   const historical = records.flat().find((entry) => entry.sha === sha)?.path;
-  if (historical) return docBaseOf(historical);
+  if (historical) {
+    return docBaseOf(historical);
+  }
   return null;
 }
 
@@ -92,10 +95,14 @@ export async function specAtCommit(
   spec: Spec,
   sha: string
 ): Promise<{ yaml: string | null; testSource: string | null }> {
-  if (!/^[0-9a-f]{40}$/i.test(sha)) throw new Error("Invalid commit sha");
+  if (!/^[0-9a-f]{40}$/i.test(sha)) {
+    throw new Error("Invalid commit sha");
+  }
   return repoGit.withRepoLock(spec.projectId, async () => {
     const base = await pathAtCommit(spec, sha);
-    if (!base) return { yaml: null, testSource: null };
+    if (!base) {
+      return { yaml: null, testSource: null };
+    }
     const git = repoGit.getProjectGit(spec.projectId);
     const [document, testSource] = await Promise.all([
       documentAt(git, sha, base),

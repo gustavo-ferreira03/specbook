@@ -105,8 +105,9 @@ export async function resolveTarget(
   } finally {
     clearTimeout(timer);
   }
-  if (!addresses.length || addresses.some((entry) => !isIP(entry.address)))
+  if (!addresses.length || addresses.some((entry) => !isIP(entry.address))) {
     throw new NetworkTargetError("The target hostname could not be resolved");
+  }
   if (
     !allowPrivate &&
     addresses.some((entry) => isPrivateAddress(entry.address))

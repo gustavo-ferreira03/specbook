@@ -87,7 +87,9 @@ export async function editSpecFiles(
       }
       await commitAndReindex(spec.projectId, `spec: edit "${spec.title}"`);
       const updated = await specsRepository.getSpec(spec.id);
-      if (!updated) throw new Error("Spec was removed during reindex");
+      if (!updated) {
+        throw new Error("Spec was removed during reindex");
+      }
       return updated;
     })
   );
@@ -132,7 +134,9 @@ export async function editFeatureFile(
       `feature: edit "${feature.title}"`
     );
     const updated = await featuresRepository.getFeature(feature.id);
-    if (!updated) throw new Error("Feature was removed during reindex");
+    if (!updated) {
+      throw new Error("Feature was removed during reindex");
+    }
     return updated;
   });
 }

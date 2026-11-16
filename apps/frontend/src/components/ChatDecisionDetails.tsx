@@ -49,21 +49,23 @@ export interface ChatDecisionDetailsProps {
 }
 
 function CandidateStatus({ candidate }: { candidate: SpecCandidate }) {
-  if (candidate.state === "passed")
+  if (candidate.state === "passed") {
     return (
       <Badge variant="success" size="sm">
         <Check size={12} aria-hidden="true" />
         Passed
       </Badge>
     );
-  if (candidate.state === "failed")
+  }
+  if (candidate.state === "failed") {
     return (
       <Badge variant="danger" size="sm">
         <X size={12} aria-hidden="true" />
         First run failed
       </Badge>
     );
-  if (candidate.state === "generating")
+  }
+  if (candidate.state === "generating") {
     return (
       <Badge variant="running" size="sm">
         <LoaderCircle
@@ -74,13 +76,15 @@ function CandidateStatus({ candidate }: { candidate: SpecCandidate }) {
         Creating
       </Badge>
     );
-  if (candidate.state === "needs_answer")
+  }
+  if (candidate.state === "needs_answer") {
     return (
       <Badge variant="warning" size="sm">
         <MessageSquareText size={12} aria-hidden="true" />
         Needs your answer
       </Badge>
     );
+  }
   return (
     <Badge variant="neutral" size="sm">
       <CircleDashed size={12} aria-hidden="true" />
@@ -103,12 +107,13 @@ function ChatSpecBatch({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const batch = item.payload.specBatch;
-  if (!batch)
+  if (!batch) {
     return (
       <p className="text-body text-ink-muted">
         This list could not load. Reload the conversation to try again.
       </p>
     );
+  }
   const pending = item.status === "pending";
   const selectedCandidates = batch.candidates.filter(
     (candidate) => candidate.selected
@@ -386,9 +391,12 @@ function Screenshots({ item }: { item: PresentedInboxItem }) {
     item.presentation.type === "update" &&
     item.presentation.screenshots.after &&
     !item.presentation.screenshots.before
-  )
+  ) {
     shots.unshift(["before", null]);
-  if (!shots.length) return null;
+  }
+  if (!shots.length) {
+    return null;
+  }
   const url = (value: string) =>
     value.startsWith("/") ? `${API_URL}${value}` : value;
   return (
@@ -443,7 +451,9 @@ function Screenshots({ item }: { item: PresentedInboxItem }) {
       <Dialog
         open={Boolean(selected)}
         onOpenChange={(open) => {
-          if (!open) setSelected(null);
+          if (!open) {
+            setSelected(null);
+          }
         }}
       >
         <DialogContent className="max-w-data sm:max-w-data">
@@ -465,10 +475,13 @@ function Screenshots({ item }: { item: PresentedInboxItem }) {
 }
 
 function SuggestedBehavior({ item }: { item: PresentedInboxItem }) {
-  if (!["update", "new_check", "feature"].includes(item.presentation.type))
+  if (!["update", "new_check", "feature"].includes(item.presentation.type)) {
     return null;
+  }
   const { humanSpec, description } = item.payload.params ?? {};
-  if (!humanSpec && !description) return null;
+  if (!humanSpec && !description) {
+    return null;
+  }
   return (
     <div className="border-line space-y-4 border-t pt-4">
       {description && (
@@ -544,8 +557,9 @@ export function ChatDecisionDetails(props: ChatDecisionDetailsProps) {
     setBusy(action);
     setError("");
     try {
-      if (action === "discuss") await onDiscuss(item);
-      else if (action === "promote") {
+      if (action === "discuss") {
+        await onDiscuss(item);
+      } else if (action === "promote") {
         await api(apiPath`/projects/${projectId}/inbox/${item.id}/promote`, {
           method: "POST",
         });

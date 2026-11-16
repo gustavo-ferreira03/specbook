@@ -43,12 +43,18 @@ export function runnerIsOutdated(
   version: string | null,
   protocolVersion: number | null
 ): boolean {
-  if (!version) return false;
-  if (protocolVersion !== RUNNER_PROTOCOL_VERSION) return true;
+  if (!version) {
+    return false;
+  }
+  if (protocolVersion !== RUNNER_PROTOCOL_VERSION) {
+    return true;
+  }
   const actual = version.split(/[.-]/).slice(0, 3).map(Number);
   const current = RUNNER_CLI_VERSION.split(".").map(Number);
   for (let index = 0; index < 3; index++) {
-    if (actual[index] !== current[index]) return actual[index] < current[index];
+    if (actual[index] !== current[index]) {
+      return actual[index] < current[index];
+    }
   }
   return version.includes("-");
 }
@@ -78,18 +84,20 @@ export async function issueRunnerToken(
   projectIds: string[] | null = null,
   purpose: RunnerToken["purpose"] = "runner"
 ) {
-  if (purpose === "tunnel" && !group)
+  if (purpose === "tunnel" && !group) {
     throw new HTTPException(400, {
       message: "Tunnel tokens require a runner group.",
     });
+  }
   if (projectIds) {
     const available = new Set(
       (await projectsRepository.listProjects()).map((project) => project.id)
     );
-    if (projectIds.some((id) => !available.has(id)))
+    if (projectIds.some((id) => !available.has(id))) {
       throw new HTTPException(400, {
         message: "A selected project no longer exists.",
       });
+    }
   }
   const issued = issuePrefixedToken("sb_runner_");
   const runner = await runnersRepository.create(
@@ -109,9 +117,15 @@ export async function authenticateRunnerToken(
   const candidate = authorization?.match(
     /^Bearer (sb_runner_[A-Za-z0-9_-]{43})$/
   )?.[1];
-  if (!candidate) return null;
+  if (!candidate) {
+    return null;
+  }
   const runner = await runnersRepository.token(tokenHash(candidate));
-  if (!runner) return null;
-  if (touch) await runnersRepository.touch(runner.id);
+  if (!runner) {
+    return null;
+  }
+  if (touch) {
+    await runnersRepository.touch(runner.id);
+  }
   return runner;
 }

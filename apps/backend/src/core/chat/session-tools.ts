@@ -54,7 +54,9 @@ export function createSessionTools(options: SessionToolOptions) {
       options.productionBaseUrl ?? options.baseUrl,
       options.environment
     );
-    if (typeof resolved === "string") return null;
+    if (typeof resolved === "string") {
+      return null;
+    }
     appOrigins.set(resolved.profile, resolved.appOrigins);
     return resolved.profile;
   }
@@ -83,15 +85,17 @@ export function createSessionTools(options: SessionToolOptions) {
           );
         }
         const profile = await profileFor(params.profile);
-        if (!profile)
+        if (!profile) {
           return text(
             `save_session failed: no credential profile named "${params.profile}".`
           );
+        }
         const activeUrl = await getActiveTabUrl(options.mcp, signal);
-        if (!activeUrl || !allows(profile, params.profile, activeUrl))
+        if (!activeUrl || !allows(profile, params.profile, activeUrl)) {
           return text(
             "save_session refused: the active page origin is not allowed for this credential profile."
           );
+        }
         const filename = `session-save-${crypto.randomUUID()}.json`;
         const filePath = path.join(options.workDir, filename);
         try {
@@ -103,10 +107,11 @@ export function createSessionTools(options: SessionToolOptions) {
             undefined,
             { signal }
           );
-          if (saved.isError)
+          if (saved.isError) {
             throw new Error(
               `browser tool failed: ${await renderMcpResult(saved as { content?: unknown }, options.workDir)}`
             );
+          }
           const raw = await fs.readFile(filePath, "utf8");
           signal?.throwIfAborted();
           await chatSessionsRepository.upsert({
@@ -146,14 +151,16 @@ export function createSessionTools(options: SessionToolOptions) {
           );
         }
         const profile = await profileFor(params.profile);
-        if (!profile)
+        if (!profile) {
           return text(
             `resume_session failed: no credential profile named "${params.profile}".`
           );
-        if (!allows(profile, params.profile, options.baseUrl))
+        }
+        if (!allows(profile, params.profile, options.baseUrl)) {
           return text(
             "resume_session refused: the run environment origin is not allowed for this credential profile."
           );
+        }
         const saved = await chatSessionsRepository.getByProfile(
           options.projectId,
           profile.id
@@ -176,23 +183,26 @@ export function createSessionTools(options: SessionToolOptions) {
             undefined,
             { signal }
           );
-          if (restored.isError)
+          if (restored.isError) {
             throw new Error(
               `browser tool failed: ${await renderMcpResult(restored as { content?: unknown }, options.workDir)}\nIf the saved session is invalid, sign in using the saved credential profile instead.`
             );
+          }
           signal?.throwIfAborted();
           await options.mcp.navigate(options.baseUrl, signal);
           const activeUrl = await getActiveTabUrl(options.mcp, signal);
-          if (!activeUrl)
+          if (!activeUrl) {
             throw new CodedError(
               "infrastructure",
               "The browser could not confirm the current page address. Navigate to the application before continuing."
             );
-          if (!allows(profile, params.profile, activeUrl))
+          }
+          if (!allows(profile, params.profile, activeUrl)) {
             throw new CodedError(
               "credential_origin",
               "The restored page origin is not allowed for this credential profile."
             );
+          }
           return text(
             `Session restored for profile "${params.profile}"; navigated to ${options.baseUrl}.`
           );

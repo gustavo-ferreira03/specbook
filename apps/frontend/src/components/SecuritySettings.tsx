@@ -43,7 +43,9 @@ export function SecuritySettings() {
   }, [load]);
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    if (!settings) return;
+    if (!settings) {
+      return;
+    }
     setBusy(true);
     setFeedback(null);
     try {

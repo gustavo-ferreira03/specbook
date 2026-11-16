@@ -199,7 +199,8 @@ export type StatusCounts = Partial<Record<SpecStatus, number>>;
 
 export function countStatuses(items: { status: SpecStatus }[]): StatusCounts {
   const counts: StatusCounts = {};
-  for (const item of items)
+  for (const item of items) {
     counts[item.status] = (counts[item.status] ?? 0) + 1;
+  }
   return counts;
 }

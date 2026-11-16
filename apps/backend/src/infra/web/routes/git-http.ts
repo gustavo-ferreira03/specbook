@@ -43,7 +43,9 @@ function unauthorized(): Response {
 
 const verifyGitToken: BearerVerifier = async (c) => {
   const projectId = GIT_PATH.exec(c.req.path)?.[1];
-  if (!projectId || !UUID.test(projectId)) return true;
+  if (!projectId || !UUID.test(projectId)) {
+    return true;
+  }
   const credentials = parseBasicAuth(c.req.header("authorization"));
   const project = credentials
     ? await projectsRepository.getProject(projectId)
@@ -60,12 +62,16 @@ function trustProxy(): boolean {
 
 export function publicGitOrigin(c: Context): string {
   const configured = process.env.SPECBOOK_PUBLIC_API_URL;
-  if (configured) return configured.replace(/\/$/, "");
+  if (configured) {
+    return configured.replace(/\/$/, "");
+  }
   const proxied = frontendProxyOrigin(
     c.req.raw.headers,
     buildHostAllowlist(Number(process.env.PORT ?? 4000))
   );
-  if (proxied) return `${proxied}/api`;
+  if (proxied) {
+    return `${proxied}/api`;
+  }
   const requestUrl = new URL(c.req.url);
   const forwarded = trustProxy();
   const forwardedHost = forwarded
@@ -86,12 +92,18 @@ export function gitCloneUrl(c: Context, projectId: string): string {
 function parseBasicAuth(
   header: string | undefined
 ): { username: string; password: string } | null {
-  if (!header) return null;
+  if (!header) {
+    return null;
+  }
   const [scheme, value] = header.split(" ");
-  if (!scheme || scheme.toLowerCase() !== "basic" || !value) return null;
+  if (!scheme || scheme.toLowerCase() !== "basic" || !value) {
+    return null;
+  }
   const decoded = Buffer.from(value, "base64").toString("utf8");
   const separator = decoded.indexOf(":");
-  if (separator < 0) return null;
+  if (separator < 0) {
+    return null;
+  }
   return {
     username: decoded.slice(0, separator),
     password: decoded.slice(separator + 1),
@@ -110,7 +122,9 @@ function splitCgiHead(buffer: Buffer): { head: CgiHead; rest: Buffer } | null {
     index = lf;
     separator = 2;
   }
-  if (index < 0) return null;
+  if (index < 0) {
+    return null;
+  }
 
   const headers: Record<string, string> = {};
   let status = 200;
@@ -119,12 +133,16 @@ function splitCgiHead(buffer: Buffer): { head: CgiHead; rest: Buffer } | null {
     .toString("utf8")
     .split(/\r?\n/)) {
     const colon = line.indexOf(":");
-    if (colon < 0) continue;
+    if (colon < 0) {
+      continue;
+    }
     const name = line.slice(0, colon).trim();
     const value = line.slice(colon + 1).trim();
-    if (name.toLowerCase() === "status")
+    if (name.toLowerCase() === "status") {
       status = Number.parseInt(value, 10) || 200;
-    else headers[name.toLowerCase()] = value;
+    } else {
+      headers[name.toLowerCase()] = value;
+    }
   }
   return {
     head: { status, headers },
@@ -147,7 +165,9 @@ function readCgiHead(stdout: Readable): Promise<CgiHead> {
         const parsed = splitCgiHead(buffer);
         if (parsed) {
           cleanup();
-          if (parsed.rest.length > 0) stdout.unshift(parsed.rest);
+          if (parsed.rest.length > 0) {
+            stdout.unshift(parsed.rest);
+          }
           resolve(parsed.head);
           return;
         }
@@ -197,12 +217,18 @@ function buildEnv(request: BackendRequest): NodeJS.ProcessEnv {
     GIT_CONFIG_SYSTEM: "/dev/null",
     GIT_TERMINAL_PROMPT: "0",
   };
-  if (request.contentType) env.CONTENT_TYPE = request.contentType;
-  if (request.contentEncoding)
+  if (request.contentType) {
+    env.CONTENT_TYPE = request.contentType;
+  }
+  if (request.contentEncoding) {
     env.HTTP_CONTENT_ENCODING = request.contentEncoding;
-  if (request.gitProtocol) env.GIT_PROTOCOL = request.gitProtocol;
-  if (!request.chunked && request.contentLength)
+  }
+  if (request.gitProtocol) {
+    env.GIT_PROTOCOL = request.gitProtocol;
+  }
+  if (!request.chunked && request.contentLength) {
     env.CONTENT_LENGTH = request.contentLength;
+  }
   return env;
 }
 
@@ -273,13 +299,17 @@ async function runBackendBuffered(
     );
   });
   const chunks: Buffer[] = [];
-  for await (const chunk of child.stdout) chunks.push(chunk as Buffer);
+  for await (const chunk of child.stdout) {
+    chunks.push(chunk as Buffer);
+  }
   return { head, body: Buffer.concat(chunks) };
 }
 
 async function alignBareWithCheckoutUnlocked(projectId: string): Promise<void> {
   const status = await repoGit.getProjectGit(projectId).status();
-  if (status.conflicted.length > 0) throw new Error("conflict");
+  if (status.conflicted.length > 0) {
+    throw new Error("conflict");
+  }
   const { moved } = await repoBare.fastForwardCheckout(
     projectId,
     repoGit.getRepoDir(projectId)
@@ -287,8 +317,9 @@ async function alignBareWithCheckoutUnlocked(projectId: string): Promise<void> {
   if (moved) {
     await reindexProjectUnlocked(projectId);
   }
-  if (!status.isClean())
+  if (!status.isClean()) {
     await repoGit.commitAll(projectId, "specbook: import working tree changes");
+  }
   await repoGit.publishToBareUnlocked(projectId);
 }
 
@@ -314,7 +345,9 @@ async function followExternalPush(projectId: string): Promise<void> {
       projectId,
       repoGit.getRepoDir(projectId)
     );
-    if (!moved) return;
+    if (!moved) {
+      return;
+    }
     await reindexProjectUnlocked(projectId);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -334,22 +367,31 @@ export function createGitHttpRouter(): Hono {
   router.all("/git/*", access("git-token", verifyGitToken), async (c) => {
     const url = new URL(c.req.url);
     const match = GIT_PATH.exec(url.pathname);
-    if (!match) return c.text("Not found\n", 404);
+    if (!match) {
+      return c.text("Not found\n", 404);
+    }
     const [, projectId, endpoint] = match;
-    if (!UUID.test(projectId)) return c.text("Not found\n", 404);
+    if (!UUID.test(projectId)) {
+      return c.text("Not found\n", 404);
+    }
 
     const query = url.search.replace(/^\?/, "");
     const service = url.searchParams.get("service");
     if (endpoint === "info/refs") {
-      if (c.req.method !== "GET") return c.text("Method not allowed\n", 405);
-      if (!service || !SERVICES.has(service))
+      if (c.req.method !== "GET") {
+        return c.text("Method not allowed\n", 405);
+      }
+      if (!service || !SERVICES.has(service)) {
         return c.text("Smart HTTP is required\n", 403);
+      }
     } else if (c.req.method !== "POST") {
       return c.text("Method not allowed\n", 405);
     }
 
     const credentials = parseBasicAuth(c.req.header("authorization"));
-    if (!credentials) return unauthorized();
+    if (!credentials) {
+      return unauthorized();
+    }
 
     let project: Project | null = null;
     try {
@@ -361,8 +403,9 @@ export function createGitHttpRouter(): Hono {
       );
       return c.text("Git backend failed\n", 500);
     }
-    if (!project || !verifyGitAccessToken(project, credentials.password))
+    if (!project || !verifyGitAccessToken(project, credentials.password)) {
       return unauthorized();
+    }
     await noteGitAccessTokenUse(projectId).catch((error: unknown) =>
       console.error(error)
     );
@@ -410,7 +453,9 @@ export function createGitHttpRouter(): Hono {
           );
         } catch (error) {
           const stateResponse = stateErrorResponse(error);
-          if (stateResponse) return stateResponse;
+          if (stateResponse) {
+            return stateResponse;
+          }
           console.error(
             `[specbook] refreshing the canonical repository for ${projectId} failed:`,
             error
@@ -426,7 +471,9 @@ export function createGitHttpRouter(): Hono {
         await alignBareWithCheckoutUnlocked(projectId);
       } catch (error) {
         const stateResponse = stateErrorResponse(error);
-        if (stateResponse) return stateResponse;
+        if (stateResponse) {
+          return stateResponse;
+        }
         console.error(
           `[specbook] preparing a push to ${projectId} failed:`,
           error

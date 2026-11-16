@@ -164,12 +164,16 @@ export function DraftReview({
         <AlertDialogContent
           onCloseAutoFocus={(event) => {
             const trigger = confirmTriggerRef.current;
-            if (!trigger?.isConnected) return;
+            if (!trigger?.isConnected) {
+              return;
+            }
             event.preventDefault();
             trigger.focus();
           }}
           onEscapeKeyDown={(event) => {
-            if (confirming) event.preventDefault();
+            if (confirming) {
+              event.preventDefault();
+            }
           }}
         >
           <div className="border-line flex items-start gap-3 border-b px-4 py-4">

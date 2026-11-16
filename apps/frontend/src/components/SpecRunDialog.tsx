@@ -66,13 +66,17 @@ function BatchDiagnostics({ runId }: { runId: string }) {
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     const controller = new AbortController();
     setError("");
     getRunEvidence(runId, controller.signal)
       .then(setEvidence)
       .catch((error) => {
-        if (!isAbortError(error)) setError(errorMessage(error));
+        if (!isAbortError(error)) {
+          setError(errorMessage(error));
+        }
       });
     return () => controller.abort();
   }, [open, runId, retryKey]);
@@ -132,7 +136,9 @@ function BatchDiagnostics({ runId }: { runId: string }) {
 }
 
 export function ApiRunEvidence({ evidence }: { evidence: RunEvidence }) {
-  if (!evidence.apiSteps?.length) return null;
+  if (!evidence.apiSteps?.length) {
+    return null;
+  }
   return (
     <section aria-label="API evidence" className="space-y-3">
       <h4 className="text-meta text-ink-muted font-semibold">
@@ -206,8 +212,9 @@ function BatchStatus({ status }: { status: SpecBatchStatus }) {
     status === "error" ||
     status === "running" ||
     status === "queued"
-  )
+  ) {
     return <StatusPill status={status} kind="run" size="sm" />;
+  }
   const Icon =
     status === "skipped" ? Minus : status === "unknown" ? CircleHelp : Clock3;
   const label =

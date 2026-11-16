@@ -58,6 +58,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth(): AuthState {
   const state = useContext(AuthContext);
-  if (!state) throw new Error("AuthProvider is required");
+  if (!state) {
+    throw new Error("AuthProvider is required");
+  }
   return state;
 }

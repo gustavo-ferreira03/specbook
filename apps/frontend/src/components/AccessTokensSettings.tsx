@@ -64,10 +64,13 @@ export function AccessTokensSettings() {
           ).tokens
         );
       } catch (reason) {
-        if (!isAbortError(reason))
+        if (!isAbortError(reason)) {
           setFeedback({ type: "error", text: errorMessage(reason) });
+        }
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(load, 30_000);
+        if (!controller.signal.aborted) {
+          timer = setTimeout(load, 30_000);
+        }
       }
     }
     void load();
@@ -108,7 +111,9 @@ export function AccessTokensSettings() {
   }
 
   async function copy() {
-    if (!secret) return;
+    if (!secret) {
+      return;
+    }
     if (await copyText(secret.value)) {
       setCopied(true);
       setCopyError(false);
@@ -120,7 +125,9 @@ export function AccessTokensSettings() {
   }
 
   async function revokeToken() {
-    if (!revoke) return;
+    if (!revoke) {
+      return;
+    }
     setBusy(true);
     setRevokeError("");
     try {
@@ -130,7 +137,9 @@ export function AccessTokensSettings() {
       setTokens(
         (current) => current?.filter((token) => token.id !== revoke.id) ?? []
       );
-      if (secret?.id === revoke.id) setSecret(null);
+      if (secret?.id === revoke.id) {
+        setSecret(null);
+      }
       setRevoke(null);
       setFeedback({ type: "success", text: "Access token revoked." });
     } catch (reason) {

@@ -104,34 +104,40 @@ export async function publishSpecsInRepo(
   for (const input of inputs) {
     if (
       !/^specs\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)+$/.test(input.path)
-    )
+    ) {
       throw new SpecPublishValidationError(
         "Use a Spec path inside specs/<feature>/<slug>"
       );
+    }
     const document = parseSpecYaml(input.files["spec.yml"]);
-    if (!document.title)
+    if (!document.title) {
       throw new SpecPublishValidationError(
         "Every Spec needs a title in spec.yml"
       );
+    }
     const validation = validateSpec(input.files["spec.ts"], document.humanSpec);
-    if (!validation.ok)
+    if (!validation.ok) {
       throw new SpecPublishValidationError(
         `${input.path}: ${validation.error}`
       );
-    if (!parseFeatureYaml(input.feature.source).title)
+    }
+    if (!parseFeatureYaml(input.feature.source).title) {
       throw new SpecPublishValidationError(
         "Every Feature needs a title in feature.yml"
       );
-    if (path.posix.dirname(input.path) !== input.feature.path)
+    }
+    if (path.posix.dirname(input.path) !== input.feature.path) {
       throw new SpecPublishValidationError(
         "The Feature path must be the Spec's parent directory"
       );
+    }
   }
   const paths = new Set(inputs.map((input) => input.path));
-  if (paths.size !== inputs.length)
+  if (paths.size !== inputs.length) {
     throw new SpecPublishValidationError(
       "Publish each Spec only once per request"
     );
+  }
   const existing = (await specsRepository.listSpecs(projectId)).filter((spec) =>
     paths.has(spec.path)
   );
@@ -145,10 +151,11 @@ export async function publishSpecsInRepo(
           !(await environmentsRepository.list(projectId)).some(
             (environment) => environment.id === environmentId
           )
-        )
+        ) {
           throw new SpecPublishValidationError(
             "The target environment was removed. Connect to an existing environment before publishing."
           );
+        }
         const conflicts: SpecRevisionConflict["conflicts"] = [];
         const changed = new Set<string>();
         const existingFeatures = new Set(
@@ -179,38 +186,45 @@ export async function publishSpecsInRepo(
           if (
             input.baseRevision !== revision ||
             (!current && (yaml !== null || source !== null))
-          )
+          ) {
             conflicts.push({ path: input.path, revision });
+          }
           if (
             revision !==
             specRevision(input.files["spec.yml"], input.files["spec.ts"])
-          )
+          ) {
             changed.add(input.path);
-          if (existingFeatures.has(input.path))
+          }
+          if (existingFeatures.has(input.path)) {
             throw new SpecPublishValidationError(
               "A Feature already uses this Spec path"
             );
+          }
           for (
             let parent = input.feature.path;
             parent !== "specs";
             parent = path.posix.dirname(parent)
           ) {
-            if (currentSpecs.has(parent) || paths.has(parent))
+            if (currentSpecs.has(parent) || paths.has(parent)) {
               throw new SpecPublishValidationError(
                 "A Spec cannot contain Features or other Specs"
               );
+            }
           }
         }
-        if (conflicts.length) throw new SpecRevisionConflict(conflicts);
+        if (conflicts.length) {
+          throw new SpecRevisionConflict(conflicts);
+        }
         if (
           inputs.some((input) => {
             const current = currentSpecs.get(input.path);
             return current && !lockedIds.has(current.id);
           })
-        )
+        ) {
           throw new ResourceBusyError(
             "The project changed while publish was being prepared. Retry publishing."
           );
+        }
         const { commitSha } = await mutateRepoUnlocked(
           projectId,
           `spec: publish ${inputs.length} from CLI`,
@@ -221,10 +235,13 @@ export async function publishSpecsInRepo(
                 let parent = input.feature.path;
                 parent !== "specs";
                 parent = path.posix.dirname(parent)
-              )
+              ) {
                 parents.unshift(parent);
+              }
               for (const parent of parents) {
-                if (existingFeatures.has(parent)) continue;
+                if (existingFeatures.has(parent)) {
+                  continue;
+                }
                 const yaml =
                   parent === input.feature.path
                     ? input.feature.source
@@ -261,7 +278,9 @@ export async function publishSpecsInRepo(
               projectId,
               input.path
             );
-            if (!spec) throw new Error("Published Spec was not indexed");
+            if (!spec) {
+              throw new Error("Published Spec was not indexed");
+            }
             return { input, spec };
           })
         );
@@ -270,12 +289,13 @@ export async function publishSpecsInRepo(
           const state = (await specEnvironmentsRepository.list(spec)).find(
             (row) => row.environmentId === environmentId
           );
-          if (changed.has(input.path) || !state)
+          if (changed.has(input.path) || !state) {
             await specEnvironmentsRepository.set(
               spec,
               environmentId,
               "awaiting_deploy"
             );
+          }
           const updated = await specsRepository.getSpec(spec.id);
           specs.push({
             id: spec.id,
@@ -319,8 +339,9 @@ export function markdownHashOf(source: string): string {
 function absolute(projectId: string, relative: string): string {
   const root = repoGit.getRepoDir(projectId);
   const resolved = path.resolve(root, relative);
-  if (!resolved.startsWith(root + path.sep) && resolved !== root)
+  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
     throw new Error("Path escapes project repo");
+  }
   return resolved;
 }
 
@@ -420,7 +441,9 @@ async function mutateRepoUnlocked<T>(
         rollbackError
       );
     });
-    if (options.checkPolicy) await reindexProjectUnlocked(projectId);
+    if (options.checkPolicy) {
+      await reindexProjectUnlocked(projectId);
+    }
     throw error;
   }
   const commitSha = await repoGit.commitAll(
@@ -445,8 +468,9 @@ export async function createFeatureInRepo(
         const parent = parentId
           ? await featuresRepository.getFeature(parentId)
           : null;
-        if (parentId && (!parent || parent.projectId !== projectId))
+        if (parentId && (!parent || parent.projectId !== projectId)) {
           throw new Error("Parent feature not found");
+        }
         const parentPath = parent ? parent.path : "specs";
         const id = crypto.randomUUID();
         const slug = uniqueSlug(
@@ -489,7 +513,9 @@ export async function createAreaFeatures(
   );
   for (const area of context.areas) {
     const key = area.name.trim().toLowerCase();
-    if (!key || titles.has(key)) continue;
+    if (!key || titles.has(key)) {
+      continue;
+    }
     titles.add(key);
     await createFeatureInRepo(
       projectId,
@@ -519,8 +545,9 @@ export async function createSpecInRepo(
       `spec: create "${input.title}"`,
       async () => {
         const feature = await featuresRepository.getFeature(input.featureId);
-        if (!feature || feature.projectId !== input.projectId)
+        if (!feature || feature.projectId !== input.projectId) {
           throw new Error("Feature not found");
+        }
         const id = input.id ?? crypto.randomUUID();
         const slug = uniqueSlug(
           input.title,
@@ -590,7 +617,9 @@ export async function updateFeatureInRepo(
         `feature: update "${patch.title ?? feature.title}"`,
         async () => {
           const current = await featuresRepository.getFeature(feature.id);
-          if (!current) throw new Error("Feature not found");
+          if (!current) {
+            throw new Error("Feature not found");
+          }
           const title = patch.title ?? current.title;
           const description = patch.description ?? current.description;
           const dir = path.posix.dirname(current.path);
@@ -624,7 +653,9 @@ export async function updateFeatureInRepo(
             for (const child of await featuresRepository.listFeatures(
               feature.projectId
             )) {
-              if (!isUnder(child.path, current.path)) continue;
+              if (!isUnder(child.path, current.path)) {
+                continue;
+              }
               queries.push(
                 featuresRepository.updateFeatureQuery(child.id, {
                   path: movedPath(child.path, current.path, featurePath),
@@ -634,7 +665,9 @@ export async function updateFeatureInRepo(
             for (const spec of await specsRepository.listSpecs(
               feature.projectId
             )) {
-              if (!isUnder(spec.path, current.path)) continue;
+              if (!isUnder(spec.path, current.path)) {
+                continue;
+              }
               queries.push(
                 specsRepository.updateSpecQuery(spec.id, {
                   path: movedPath(spec.path, current.path, featurePath),
@@ -656,7 +689,9 @@ export async function updateFeatureInRepo(
         );
       }
       const updated = await featuresRepository.getFeature(feature.id);
-      if (!updated) throw new Error("Feature disappeared during update");
+      if (!updated) {
+        throw new Error("Feature disappeared during update");
+      }
       return updated;
     });
   } finally {
@@ -700,7 +735,9 @@ export async function updateSpecInRepo(
       `spec: update "${patch.title ?? spec.title}"`,
       async () => {
         const current = await specsRepository.getSpec(spec.id);
-        if (!current) throw new Error("Spec not found");
+        if (!current) {
+          throw new Error("Spec not found");
+        }
         const currentYaml = await readFile(
           current.projectId,
           specYamlFile(current.path)
@@ -784,7 +821,9 @@ export async function updateSpecInRepo(
       options
     );
     const updated = await specsRepository.getSpec(spec.id);
-    if (!updated) throw new Error("Spec disappeared during update");
+    if (!updated) {
+      throw new Error("Spec disappeared during update");
+    }
     return { spec: updated, commitSha };
   });
 }
@@ -795,7 +834,9 @@ export async function updateSpecWithLock(
 ): Promise<{ spec: Spec; commitSha: string } | null> {
   return withSpecLock(specId, async () => {
     const spec = await specsRepository.getSpec(specId);
-    if (!spec) return null;
+    if (!spec) {
+      return null;
+    }
     return updateSpecInRepo(spec, patch);
   });
 }

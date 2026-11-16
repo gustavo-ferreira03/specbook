@@ -30,13 +30,15 @@ export async function projectRunPolicy(
     (await resolveRunEnvironment(project.id, "Production", baseUrl));
   const base = httpTarget(selected.configuredBaseUrl);
   const origins = [...new Set([base.origin, ...selected.allowedOrigins])];
-  if (!origins.includes(target.origin))
+  if (!origins.includes(target.origin)) {
     throw new NetworkTargetError(
       "Add this origin in Settings → Environments before using it for a deployment or preview run"
     );
+  }
   // Private hostnames are resolved inside the runner's network, never on the server.
-  if (selected.executor === "runner" || selected.executor === "tunnel")
+  if (selected.executor === "runner" || selected.executor === "tunnel") {
     return { origins, allowPrivate: true };
+  }
   const hostname = base.hostname.replace(/^\[|\]$/g, "");
   const allowPrivate = isIP(hostname)
     ? isPrivateAddress(hostname)
@@ -51,6 +53,8 @@ export async function runNetworkPolicy(
   environment?: RunEnvironment
 ): Promise<RunNetworkPolicy> {
   const project = await projectsRepository.getProject(projectId);
-  if (!project) throw new NetworkTargetError("Project not found");
+  if (!project) {
+    throw new NetworkTargetError("Project not found");
+  }
   return projectRunPolicy(project, baseUrl, undefined, environment);
 }

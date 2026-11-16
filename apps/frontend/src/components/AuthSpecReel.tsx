@@ -78,7 +78,9 @@ export function AuthSpecReel() {
   }, []);
 
   useEffect(() => {
-    if (still) return;
+    if (still) {
+      return;
+    }
     if (!visible) {
       const timer = window.setTimeout(() => {
         setSpecIndex((index) => (index + 1) % SPECS.length);

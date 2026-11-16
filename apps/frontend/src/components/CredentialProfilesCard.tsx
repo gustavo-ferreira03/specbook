@@ -127,13 +127,14 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
       previousKey: field.previousKey,
     }));
     try {
-      if (openId === "new")
+      if (openId === "new") {
         await createCredentialProfile(projectId, {
           name: name.trim(),
           fields: inputs,
         });
-      else if (openId)
+      } else if (openId) {
         await updateCredentialProfile(openId, { fields: inputs });
+      }
       setOpenId(null);
       await refresh();
     } catch (err) {
@@ -150,7 +151,9 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
   }
 
   async function confirmRemove() {
-    if (!deleteTarget) return;
+    if (!deleteTarget) {
+      return;
+    }
     setDeleting(true);
     setDeleteError("");
     try {
@@ -318,14 +321,18 @@ export function CredentialProfilesCard({ projectId }: { projectId: string }) {
       <Dialog
         open={openId !== null}
         onOpenChange={(open) => {
-          if (!open && !saving) setOpenId(null);
+          if (!open && !saving) {
+            setOpenId(null);
+          }
         }}
       >
         <DialogContent
           className="max-h-[85dvh] max-w-xl overflow-y-auto"
           onCloseAutoFocus={(event) => {
             const trigger = triggerRef.current;
-            if (!trigger?.isConnected) return;
+            if (!trigger?.isConnected) {
+              return;
+            }
             event.preventDefault();
             trigger.focus();
           }}

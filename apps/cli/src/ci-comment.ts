@@ -19,7 +19,9 @@ export function scrubCi(value: string): string {
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
   return value;
 }
 
@@ -36,16 +38,18 @@ function httpUrl(value: string, name: string): string {
     url.password ||
     url.search ||
     url.hash
-  )
+  ) {
     throw new Error(
       `${name} must be an HTTP(S) URL without credentials, query or fragment`
     );
+  }
   return url.href.replace(/\/$/, "");
 }
 
 function number(value: unknown, name: string): string {
-  if (!/^[1-9]\d*$/.test(String(value)))
+  if (!/^[1-9]\d*$/.test(String(value))) {
     throw new Error(`${name} must be a positive integer`);
+  }
   return String(value);
 }
 
@@ -60,7 +64,9 @@ export interface CiCommentContext {
 export async function ciCommentContext(
   provider: string
 ): Promise<CiCommentContext | null> {
-  if (provider === "none") return null;
+  if (provider === "none") {
+    return null;
+  }
   if (provider === "github") {
     let pullRequest: unknown = process.env.SPECBOOK_PR_NUMBER;
     if (!pullRequest && process.env.GITHUB_EVENT_PATH) {
@@ -69,10 +75,13 @@ export async function ciCommentContext(
       ) as { pull_request?: { number?: number } };
       pullRequest = event.pull_request?.number;
     }
-    if (!pullRequest) return null;
+    if (!pullRequest) {
+      return null;
+    }
     const repository = required("GITHUB_REPOSITORY");
-    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
       throw new Error("GITHUB_REPOSITORY must be owner/repository");
+    }
     return {
       provider,
       api: httpUrl(
@@ -88,14 +97,18 @@ export async function ciCommentContext(
       },
     };
   }
-  if (provider !== "gitlab")
+  if (provider !== "gitlab") {
     throw new Error("Comment provider must be github, gitlab or none");
+  }
   const mergeRequest = process.env.CI_MERGE_REQUEST_IID;
-  if (!mergeRequest) return null;
-  if (!process.env.SPECBOOK_GITLAB_TOKEN)
+  if (!mergeRequest) {
+    return null;
+  }
+  if (!process.env.SPECBOOK_GITLAB_TOKEN) {
     throw new Error(
       "GitLab note publishing requires SPECBOOK_GITLAB_TOKEN: a project access token with api scope. CI_JOB_TOKEN cannot create or update merge-request notes."
     );
+  }
   const project =
     process.env.CI_MERGE_REQUEST_PROJECT_ID || required("CI_PROJECT_ID");
   return {
@@ -120,15 +133,18 @@ export async function publishCiComment(
   project: string,
   summary: string
 ): Promise<void> {
-  if (!context) return;
+  if (!context) {
+    return;
+  }
   const deadline = Date.now() + 60_000;
   async function request(
     route: string,
     method = "GET",
     body?: { body: string }
   ): Promise<unknown> {
-    if (Date.now() >= deadline)
+    if (Date.now() >= deadline) {
       throw new Error("Timed out publishing the Specbook comment");
+    }
     const response = await remoteFetch(`${context!.api}${route}`, {
       method,
       headers: { ...context!.headers, "Content-Type": "application/json" },
@@ -138,15 +154,16 @@ export async function publishCiComment(
         Math.min(30_000, Math.max(1, deadline - Date.now()))
       ),
     });
-    if (!response.ok)
+    if (!response.ok) {
       throw new Error(
         `${context!.provider === "github" ? "GitHub" : "GitLab"} comment API returned HTTP ${response.status}; reports are saved locally`
       );
+    }
     return response.status === 204 ? null : response.json();
   }
   const marker = `<!-- specbook:${crypto.createHash("sha256").update(`${api}/${project}`).digest("hex")} -->`;
   let body = `${marker}\n${scrubCi(summary)}`;
-  if (Buffer.byteLength(body, "utf8") > 60_000)
+  if (Buffer.byteLength(body, "utf8") > 60_000) {
     body = `${Buffer.from(body)
       .subarray(0, 55_000)
       .toString("utf8")
@@ -154,6 +171,7 @@ export async function publishCiComment(
         /\uFFFD$/,
         ""
       )}\n\nSummary truncated. Download specbook-summary.md from the job artifacts for all results.`;
+  }
   const author =
     context.provider === "gitlab"
       ? number(
@@ -166,8 +184,9 @@ export async function publishCiComment(
     const comments = await request(
       `${context.route}?per_page=100&page=${page}`
     );
-    if (!Array.isArray(comments))
+    if (!Array.isArray(comments)) {
       throw new Error("Comment API returned an invalid list");
+    }
     matches.push(
       ...(comments as ProviderComment[]).filter(
         (comment) =>
@@ -178,11 +197,14 @@ export async function publishCiComment(
             : String(comment.author?.id) === author && !comment.system)
       )
     );
-    if (comments.length < 100) break;
-    if (page === 100)
+    if (comments.length < 100) {
+      break;
+    }
+    if (page === 100) {
       throw new Error(
         "Too many comments to safely locate the Specbook summary"
       );
+    }
   }
   const route = (comment: ProviderComment) =>
     context.provider === "github"
@@ -194,7 +216,10 @@ export async function publishCiComment(
       context.provider === "github" ? "PATCH" : "PUT",
       { body }
     );
-    for (const duplicate of matches.slice(1))
+    for (const duplicate of matches.slice(1)) {
       await request(route(duplicate), "DELETE");
-  } else await request(context.route, "POST", { body });
+    }
+  } else {
+    await request(context.route, "POST", { body });
+  }
 }

@@ -48,8 +48,9 @@ function failedStepOf(test: Json, result: Json): string | null {
     if (
       annotation.type === FAILED_STEP_ANNOTATION &&
       text(annotation.description)
-    )
+    ) {
       return String(annotation.description);
+    }
   }
   const failed = records(result.steps).find((step) => step.error);
   return failed ? text(failed.title) : null;
@@ -62,7 +63,7 @@ function fileKey(file: string): string {
 function testResult(test: Json): SpecFileResult {
   const results = records(test.results);
   const result = results[results.length - 1];
-  if (!result)
+  if (!result) {
     return {
       status: "error",
       durationMs: null,
@@ -71,6 +72,7 @@ function testResult(test: Json): SpecFileResult {
       attachments: [],
       errorCode: "infrastructure",
     };
+  }
   const duration = Number(result.duration);
   const durationMs = Number.isFinite(duration) ? Math.round(duration) : null;
   const attachments = records(result.attachments).flatMap((attachment) =>
@@ -85,7 +87,7 @@ function testResult(test: Json): SpecFileResult {
       : []
   );
   const status = String(result.status ?? "");
-  if (status === "passed")
+  if (status === "passed") {
     return {
       status: "passed",
       durationMs,
@@ -93,6 +95,7 @@ function testResult(test: Json): SpecFileResult {
       failedStep: null,
       attachments,
     };
+  }
   const messages = records(result.errors)
     .map(errorMessage)
     .filter((message): message is string => !!message);
@@ -100,7 +103,9 @@ function testResult(test: Json): SpecFileResult {
     result.error && typeof result.error === "object"
       ? errorMessage(result.error as Json)
       : null;
-  if (messages.length === 0 && single) messages.push(single);
+  if (messages.length === 0 && single) {
+    messages.push(single);
+  }
   if (status === "skipped") {
     return {
       status: "error",
@@ -138,12 +143,16 @@ function collect(
     const suiteFile = text(suite.file) ?? file;
     for (const spec of records(suite.specs)) {
       const specFile = text(spec.file) ?? suiteFile;
-      if (!specFile) continue;
+      if (!specFile) {
+        continue;
+      }
       const key = fileKey(specFile);
       for (const test of records(spec.tests)) {
         const result = testResult(test);
         const previous = files.get(key);
-        if (!previous || previous.status === "passed") files.set(key, result);
+        if (!previous || previous.status === "passed") {
+          files.set(key, result);
+        }
       }
     }
     collect(records(suite.suites), files, suiteFile);
@@ -152,8 +161,9 @@ function collect(
 
 export function parsePlaywrightReport(json: string): PlaywrightReport {
   const data = JSON.parse(json) as Json;
-  if (!data || typeof data !== "object" || !Array.isArray(data.suites))
+  if (!data || typeof data !== "object" || !Array.isArray(data.suites)) {
     throw new Error("Playwright report has no suites");
+  }
   const files = new Map<string, SpecFileResult>();
   collect(records(data.suites), files, null);
   const errors = records(data.errors)

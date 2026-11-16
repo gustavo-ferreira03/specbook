@@ -124,15 +124,21 @@ export function AutomationSettingsCard({ projectId }: { projectId: string }) {
         setNotifications(result.notifications);
       })
       .catch((error) => {
-        if (!isAbortError(error)) setLoadError(errorMessage(error));
+        if (!isAbortError(error)) {
+          setLoadError(errorMessage(error));
+        }
       })
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       });
     getProjectTree(projectId, controller.signal)
       .then((result) => setSpecs(result.specs))
       .catch((error) => {
-        if (!isAbortError(error)) setSpecsError(errorMessage(error));
+        if (!isAbortError(error)) {
+          setSpecsError(errorMessage(error));
+        }
       });
     return () => controller.abort();
   }, [projectId, retryKey]);

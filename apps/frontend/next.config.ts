@@ -33,11 +33,12 @@ const nextConfig: NextConfig = {
       ...config.resolve.alias,
       "@": path.resolve(process.cwd(), "src"),
     };
-    if (!isServer)
+    if (!isServer) {
       config.output.environment = {
         ...config.output.environment,
         asyncFunction: true,
       };
+    }
     return config;
   },
 };

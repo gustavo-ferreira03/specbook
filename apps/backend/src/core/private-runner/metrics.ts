@@ -29,7 +29,9 @@ export function queueMetrics(queues: RunnerQueueEntry[]) {
     { group: string | null; queued: number; oldestWaitSeconds: number }
   >();
   for (const queue of queues) {
-    if (queue.executor !== "runner") continue;
+    if (queue.executor !== "runner") {
+      continue;
+    }
     const value = groups.get(queue.group) ?? {
       group: queue.group,
       queued: 0,

@@ -180,7 +180,7 @@ try {
     const source = (
       await fs.readFile(path.join(workspace, selectedPath, "spec.ts"), "utf8")
     ).replace(`// ${sentinel}`, "");
-    for (let index = 0; index < 2; index++)
+    for (let index = 0; index < 2; index++) {
       assert.equal(
         (
           await resumedCall("spec_write", {
@@ -190,6 +190,7 @@ try {
         ).isError,
         undefined
       );
+    }
     const saved = JSON.parse(
       await fs.readFile(path.join(session, "state.json"), "utf8")
     );
@@ -223,11 +224,12 @@ try {
         .isError,
       true
     );
-    if (process.platform !== "win32")
+    if (process.platform !== "win32") {
       assert.equal(
         (await fs.stat(path.join(session, "outcome.json"))).mode & 0o777,
         0o600
       );
+    }
   } finally {
     await restarted.close();
   }
@@ -393,11 +395,12 @@ try {
           stderr: "pipe",
         })
       );
-      if (tool === "request_credentials")
+      if (tool === "request_credentials") {
         await outcomeClient.callTool({
           name: "credentials_list",
           arguments: {},
         });
+      }
       assert.equal(
         (await outcomeClient.callTool({ name: tool, arguments: args })).isError,
         undefined
@@ -441,7 +444,9 @@ try {
   const marker = "SpecbookSessionProbeMarker9472";
   server = http.createServer(async (request, response) => {
     let body = "";
-    for await (const chunk of request) body += chunk;
+    for await (const chunk of request) {
+      body += chunk;
+    }
     let parsed;
     try {
       parsed = JSON.parse(body);
@@ -594,8 +599,11 @@ try {
         }
         throw error;
       } finally {
-        if (previousKey === undefined) delete process.env[keyName];
-        else process.env[keyName] = previousKey;
+        if (previousKey === undefined) {
+          delete process.env[keyName];
+        } else {
+          process.env[keyName] = previousKey;
+        }
       }
       if (agent === "codex") {
         const position = invocation.args.includes("resume")
@@ -639,14 +647,18 @@ try {
         assert.equal(result.code, 0, result.errors);
         assert.ok(result.sessionId, `${agent} did not return a session id`);
         assert.equal(persistedId, result.sessionId);
-        if (sessionId) assert.equal(result.sessionId, sessionId);
-        else sessionId = result.sessionId;
+        if (sessionId) {
+          assert.equal(result.sessionId, sessionId);
+        } else {
+          sessionId = result.sessionId;
+        }
         assert.ok(modelRequest, `${agent} did not make a model request`);
-        if (turn)
+        if (turn) {
           assert.ok(
             JSON.stringify(modelRequest.body).includes(marker),
             `${agent} resume lost its previous turn`
           );
+        }
         const exposed = modelRequest.tools;
         const resourceWrappers =
           agent === "codex"
@@ -682,7 +694,10 @@ try {
   await client.close();
   await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
   await fs.rm(root, { recursive: true, force: true });
-  if (previousSpecbookHome === undefined) delete process.env.SPECBOOK_HOME;
-  else process.env.SPECBOOK_HOME = previousSpecbookHome;
+  if (previousSpecbookHome === undefined) {
+    delete process.env.SPECBOOK_HOME;
+  } else {
+    process.env.SPECBOOK_HOME = previousSpecbookHome;
+  }
   process.argv[1] = previousLauncher;
 }

@@ -85,7 +85,9 @@ export function useChatResults(chatId: string, projectId: string) {
       const data = await api<ChatResults>(apiPath`/chats/${chatId}/results`, {
         signal: controller.signal,
       });
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        return;
+      }
       setState((previous) =>
         previous.chatId === chatId &&
         !previous.error &&
@@ -94,12 +96,13 @@ export function useChatResults(chatId: string, projectId: string) {
           : { chatId, data, error: "" }
       );
     } catch (error) {
-      if (!controller.signal.aborted && !isAbortError(error))
+      if (!controller.signal.aborted && !isAbortError(error)) {
         setState((previous) => ({
           chatId,
           data: previous.chatId === chatId ? previous.data : null,
           error: errorMessage(error),
         }));
+      }
     }
   }, [chatId]);
 
@@ -111,7 +114,9 @@ export function useChatResults(chatId: string, projectId: string) {
   useEffect(
     () =>
       onInvalidate((event) => {
-        if (!event.projectId || event.projectId === projectId) void reload();
+        if (!event.projectId || event.projectId === projectId) {
+          void reload();
+        }
       }),
     [projectId, reload]
   );

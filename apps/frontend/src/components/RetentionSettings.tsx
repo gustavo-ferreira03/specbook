@@ -84,7 +84,9 @@ export function RetentionSettings() {
   }, [load]);
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    if (!data) return;
+    if (!data) {
+      return;
+    }
     setBusy(true);
     setFeedback(null);
     try {

@@ -9,8 +9,9 @@ function decodeBase32(input: string): Buffer {
   const bytes: number[] = [];
   for (const char of clean) {
     const index = BASE32.indexOf(char);
-    if (index < 0)
+    if (index < 0) {
       throw new Error("The authenticator key is not valid base32.");
+    }
     value = (value << 5) | index;
     bits += 5;
     if (bits >= 8) {
@@ -30,16 +31,19 @@ interface TotpParams {
 
 function parseTotpSeed(seed: string): TotpParams {
   const trimmed = seed.trim();
-  if (!trimmed.toLowerCase().startsWith("otpauth://"))
+  if (!trimmed.toLowerCase().startsWith("otpauth://")) {
     return {
       secret: decodeBase32(trimmed),
       digits: 6,
       period: 30,
       algorithm: "sha1",
     };
+  }
   const url = new URL(trimmed);
   const secret = url.searchParams.get("secret");
-  if (!secret) throw new Error("The otpauth URI has no secret.");
+  if (!secret) {
+    throw new Error("The otpauth URI has no secret.");
+  }
   const algorithm = (url.searchParams.get("algorithm") ?? "SHA1").toLowerCase();
   return {
     secret: decodeBase32(secret),

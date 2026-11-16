@@ -103,9 +103,12 @@ function providerAuthLabel(provider: LlmProvider) {
   if (
     provider.authMethods.includes("oauth") &&
     provider.authMethods.includes("api_key")
-  )
+  ) {
     return "Subscription or API key";
-  if (provider.authMethods.includes("oauth")) return "Subscription";
+  }
+  if (provider.authMethods.includes("oauth")) {
+    return "Subscription";
+  }
   return "API key";
 }
 
@@ -171,10 +174,14 @@ export function ModelSettings({
     setLoadError("");
     refreshSettings()
       .then((result) => {
-        if (active) setDraft(result.current);
+        if (active) {
+          setDraft(result.current);
+        }
       })
       .catch((error) => {
-        if (active) setLoadError(errorMessage(error));
+        if (active) {
+          setLoadError(errorMessage(error));
+        }
       });
     return () => {
       active = false;
@@ -208,7 +215,9 @@ export function ModelSettings({
 
   async function saveCurrentSettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!draft) return;
+    if (!draft) {
+      return;
+    }
     setSavingSettings(true);
     setSettingsFeedback(null);
     try {
@@ -223,7 +232,9 @@ export function ModelSettings({
 
   function selectProvider(providerId: string) {
     const provider = settings?.providers.find((item) => item.id === providerId);
-    if (!provider) return;
+    if (!provider) {
+      return;
+    }
     const currentModel = provider.id === draft?.provider ? draft.model : "";
     const model = provider.models.some((item) => item.id === currentModel)
       ? currentModel
@@ -239,7 +250,9 @@ export function ModelSettings({
     setShowApiKey(false);
     setManualOAuthInput("");
     setProviderFeedback(null);
-    if (opening) setAuthMethod(provider.authMethods[0] ?? "api_key");
+    if (opening) {
+      setAuthMethod(provider.authMethods[0] ?? "api_key");
+    }
   }
 
   async function saveApiKey(
@@ -248,7 +261,9 @@ export function ModelSettings({
   ) {
     event.preventDefault();
     const value = apiKey.trim();
-    if (!value) return;
+    if (!value) {
+      return;
+    }
     setProviderBusy(providerId);
     setProviderFeedback(null);
     try {
@@ -305,20 +320,26 @@ export function ModelSettings({
     setOAuthState({ providerId, status: "starting" });
     try {
       const started = await startLlmProviderOAuth(providerId);
-      if (generation !== oauthGenerationRef.current) return;
+      if (generation !== oauthGenerationRef.current) {
+        return;
+      }
       setOAuthState({
         providerId,
         sessionId: started.sessionId,
         status: "pending",
       });
       const poll = async () => {
-        if (generation !== oauthGenerationRef.current) return;
+        if (generation !== oauthGenerationRef.current) {
+          return;
+        }
         try {
           const result = await pollLlmProviderOAuth(
             providerId,
             started.sessionId
           );
-          if (generation !== oauthGenerationRef.current) return;
+          if (generation !== oauthGenerationRef.current) {
+            return;
+          }
           setOAuthState((current) => ({
             providerId,
             sessionId: started.sessionId,
@@ -334,10 +355,14 @@ export function ModelSettings({
             });
             return;
           }
-          if (result.status === "error") return;
+          if (result.status === "error") {
+            return;
+          }
           oauthTimerRef.current = window.setTimeout(poll, 2000);
         } catch (error) {
-          if (generation !== oauthGenerationRef.current) return;
+          if (generation !== oauthGenerationRef.current) {
+            return;
+          }
           setOAuthState({
             providerId,
             sessionId: started.sessionId,
@@ -348,7 +373,9 @@ export function ModelSettings({
       };
       oauthTimerRef.current = window.setTimeout(poll, 500);
     } catch (error) {
-      if (generation !== oauthGenerationRef.current) return;
+      if (generation !== oauthGenerationRef.current) {
+        return;
+      }
       setOAuthState({
         providerId,
         status: "error",
@@ -364,7 +391,9 @@ export function ModelSettings({
   ) {
     event.preventDefault();
     const input = manualOAuthInput.trim();
-    if (!input || providerBusy === providerId) return;
+    if (!input || providerBusy === providerId) {
+      return;
+    }
     setProviderBusy(providerId);
     try {
       await submitLlmProviderOAuthInput(providerId, sessionId, input);
@@ -390,7 +419,9 @@ export function ModelSettings({
     sessionId: string,
     optionId: string
   ) {
-    if (providerBusy === providerId) return;
+    if (providerBusy === providerId) {
+      return;
+    }
     setProviderBusy(providerId);
     try {
       await submitLlmProviderOAuthInput(providerId, sessionId, optionId);
@@ -407,7 +438,9 @@ export function ModelSettings({
 
   async function copyDeviceCode(code: string) {
     const copied = await copyText(code);
-    if (!oauthState) return;
+    if (!oauthState) {
+      return;
+    }
     setProviderFeedback(
       copied
         ? {
@@ -506,11 +539,15 @@ export function ModelSettings({
   );
 
   async function testConnection() {
-    if (!draft) return;
+    if (!draft) {
+      return;
+    }
     setTesting(true);
     setSettingsFeedback(null);
     try {
-      if (hasChanges) await saveDraft(draft);
+      if (hasChanges) {
+        await saveDraft(draft);
+      }
       const result = await testLlmConnection();
       setSettingsFeedback({ type: "success", text: result.message });
       onConnectionTested?.();
@@ -751,8 +788,11 @@ export function ModelSettings({
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           const trigger = providerTriggerRef.current;
-          if (trigger?.isConnected) trigger.focus();
-          else manageProvidersRef.current?.focus();
+          if (trigger?.isConnected) {
+            trigger.focus();
+          } else {
+            manageProvidersRef.current?.focus();
+          }
           providerTriggerRef.current = null;
         }}
       >
@@ -820,7 +860,9 @@ export function ModelSettings({
                     asChild
                     open={expanded}
                     onOpenChange={(open) => {
-                      if (open !== expanded) toggleProvider(provider);
+                      if (open !== expanded) {
+                        toggleProvider(provider);
+                      }
                     }}
                   >
                     <section className="border-line border-b py-1 last:border-0">

@@ -60,8 +60,9 @@ async function socketPath(workspace: string): Promise<string> {
     .update(`${root}\0${process.env.SPECBOOK_HOME ?? ""}`)
     .digest("hex")
     .slice(0, 32);
-  if (process.platform === "win32")
+  if (process.platform === "win32") {
     return `\\\\.\\pipe\\specbook-${user}-${key}`;
+  }
   const directory = path.join(os.tmpdir(), `specbook-browser-${user}`);
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const info = await fs.lstat(directory);
@@ -69,8 +70,9 @@ async function socketPath(workspace: string): Promise<string> {
     !info.isDirectory() ||
     info.isSymbolicLink() ||
     info.uid !== process.getuid?.()
-  )
+  ) {
     throw new Error("The browser socket directory is not owned by this user");
+  }
   await fs.chmod(directory, 0o700);
   return path.join(directory, `${key}.sock`);
 }
@@ -94,22 +96,28 @@ async function send(
         connection.destroy(new Error("The browser response was too large"));
         return;
       }
-      if (!response.includes("\n")) return;
+      if (!response.includes("\n")) {
+        return;
+      }
       connection.end();
       try {
         const result = JSON.parse(
           response.slice(0, response.indexOf("\n"))
         ) as { ok: boolean; result?: unknown; error?: string };
-        if (result.ok) resolve(result.result);
-        else reject(new Error(result.error ?? "The browser command failed"));
+        if (result.ok) {
+          resolve(result.result);
+        } else {
+          reject(new Error(result.error ?? "The browser command failed"));
+        }
       } catch (error) {
         reject(error);
       }
     });
     connection.once("error", reject);
     connection.once("end", () => {
-      if (!response.includes("\n"))
+      if (!response.includes("\n")) {
         reject(new Error("The browser session closed without a response"));
+      }
     });
   });
 }
@@ -136,20 +144,28 @@ export async function browse(
   try {
     return await send(socket, request);
   } catch (error) {
-    if (!unavailable(error)) throw error;
-    if (action === "close") return { closed: true };
-    if (action !== "open")
+    if (!unavailable(error)) {
+      throw error;
+    }
+    if (action === "close") {
+      return { closed: true };
+    }
+    if (action !== "open") {
       throw new Error(
         "No exploration session is open. Run specbook browse open first."
       );
+    }
   }
   await localNetworkPolicy(args.baseUrl);
   await ensureChromium();
   if (process.platform !== "win32") {
     const info = await fs.lstat(socket).catch(() => null);
-    if (info && (!info.isSocket() || info.uid !== process.getuid?.()))
+    if (info && (!info.isSocket() || info.uid !== process.getuid?.())) {
       throw new Error("Unsafe browser socket path");
-    if (info) await fs.unlink(socket);
+    }
+    if (info) {
+      await fs.unlink(socket);
+    }
   }
   const child = spawn(
     process.execPath,
@@ -169,12 +185,16 @@ export async function browse(
   });
   child.unref();
   for (let attempt = 0; attempt < 100; attempt++) {
-    if (startupError) throw startupError;
+    if (startupError) {
+      throw startupError;
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
     try {
       return await send(socket, request);
     } catch (error) {
-      if (!unavailable(error)) throw error;
+      if (!unavailable(error)) {
+        throw error;
+      }
     }
   }
   throw new Error(
@@ -192,7 +212,9 @@ export async function checkLiveLocators(
       source,
     })) as LocatorCheck[];
   } catch (error) {
-    if (unavailable(error)) return [];
+    if (unavailable(error)) {
+      return [];
+    }
     throw error;
   }
 }
@@ -217,8 +239,10 @@ export async function startBrowserDaemon(
   const connections = new Set<net.Socket>();
   const safe = async (value: unknown): Promise<unknown> => {
     value = redactUrls(value);
-    if (Array.isArray(value)) return Promise.all(value.map(safe));
-    if (value && typeof value === "object")
+    if (Array.isArray(value)) {
+      return Promise.all(value.map(safe));
+    }
+    if (value && typeof value === "object") {
       return Object.fromEntries(
         await Promise.all(
           Object.entries(value).map(async ([key, item]) => [
@@ -227,7 +251,10 @@ export async function startBrowserDaemon(
           ])
         )
       );
-    if (typeof value !== "string") return value;
+    }
+    if (typeof value !== "string") {
+      return value;
+    }
     let text = value;
     for (const secret of secrets) {
       for (const spelling of new Set([
@@ -235,21 +262,28 @@ export async function startBrowserDaemon(
         JSON.stringify(secret).slice(1, -1),
         encodeURIComponent(secret),
       ])) {
-        if (spelling) text = text.split(spelling).join("[redacted]");
+        if (spelling) {
+          text = text.split(spelling).join("[redacted]");
+        }
       }
     }
     return scrub(text);
   };
   const shutdown = async () => {
-    if (closing) return;
+    if (closing) {
+      return;
+    }
     closing = true;
     clearTimeout(idle);
     await browser?.close().catch(() => undefined);
     await proxy?.close().catch(() => undefined);
-    for (const connection of connections) connection.destroy();
+    for (const connection of connections) {
+      connection.destroy();
+    }
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    if (!socketRemoved && process.platform !== "win32")
+    if (!socketRemoved && process.platform !== "win32") {
       await fs.unlink(socket).catch(() => undefined);
+    }
   };
   const touch = () => {
     clearTimeout(idle);
@@ -257,32 +291,38 @@ export async function startBrowserDaemon(
     idle.unref();
   };
   const assertOrigin = () => {
-    if (!page || page.isClosed())
+    if (!page || page.isClosed()) {
       throw new Error(
         "The exploration browser is closed. Run specbook browse close, then browse open."
       );
-    if (new URL(page.url()).origin !== origin)
+    }
+    if (new URL(page.url()).origin !== origin) {
       throw new Error(
         "Navigate to the workspace base URL before inspecting or interacting with this page"
       );
+    }
     return page;
   };
   const reference = async (ref: string): Promise<Locator> => {
     const clean = ref.replace(/^aria-ref=/, "");
-    if (!/^(?:f\d+)?e\d+$/.test(clean) || !refs.has(clean))
+    if (!/^(?:f\d+)?e\d+$/.test(clean) || !refs.has(clean)) {
       throw new Error(
         "The element ref is stale or missing. Take a fresh browser snapshot."
       );
+    }
     const current = assertOrigin();
     const matches: Locator[] = [];
     for (const frame of current.frames()) {
       const locator = frame.locator(`aria-ref=${clean}`);
-      if ((await locator.count().catch(() => 0)) === 1) matches.push(locator);
+      if ((await locator.count().catch(() => 0)) === 1) {
+        matches.push(locator);
+      }
     }
-    if (matches.length !== 1)
+    if (matches.length !== 1) {
       throw new Error(
         "The element ref is stale or ambiguous. Take a fresh browser snapshot."
       );
+    }
     return matches[0]!;
   };
   const snapshot = async () => {
@@ -295,7 +335,9 @@ export async function startBrowserDaemon(
     );
     for (const line of tree.split("\n")) {
       const ref = line.match(/\[ref=((?:f\d+)?e\d+)\]/)?.[1];
-      if (!ref || !/\b(textbox|searchbox|combobox)\b/.test(line)) continue;
+      if (!ref || !/\b(textbox|searchbox|combobox)\b/.test(line)) {
+        continue;
+      }
       const target = await reference(ref).catch(() => null);
       const secretField = await target
         ?.evaluate((element) =>
@@ -305,11 +347,12 @@ export async function startBrowserDaemon(
           )
         )
         .catch(() => false);
-      if (secretField)
+      if (secretField) {
         tree = tree.replace(
           line,
           line.replace(/(\[ref=[^\]]+\][^:]*)(?::.*)?$/, "$1: [redacted]")
         );
+      }
     }
     const url = current.url();
     const title = await current.title();
@@ -321,7 +364,9 @@ export async function startBrowserDaemon(
     });
   };
   const ensureBrowser = async () => {
-    if (page && !page.isClosed()) return;
+    if (page && !page.isClosed()) {
+      return;
+    }
     await browser?.close().catch(() => undefined);
     await proxy?.close().catch(() => undefined);
     await ensureChromium();
@@ -361,11 +406,15 @@ export async function startBrowserDaemon(
     });
     page = await context.newPage();
     page.on("framenavigated", (frame) => {
-      if (frame === page?.mainFrame()) refs.clear();
+      if (frame === page?.mainFrame()) {
+        refs.clear();
+      }
     });
     page.on("dialog", (dialog) => void dialog.dismiss().catch(() => undefined));
     context.on("page", (other) => {
-      if (other !== page) void other.close().catch(() => undefined);
+      if (other !== page) {
+        void other.close().catch(() => undefined);
+      }
     });
   };
   const execute = async (
@@ -374,21 +423,24 @@ export async function startBrowserDaemon(
     touch();
     if (request.action === "close") {
       server.close();
-      if (process.platform !== "win32")
+      if (process.platform !== "win32") {
         await fs.unlink(socket).catch(() => undefined);
+      }
       socketRemoved = true;
       return { closed: true };
     }
-    if (request.baseUrl && httpTarget(request.baseUrl).origin !== origin)
+    if (request.baseUrl && httpTarget(request.baseUrl).origin !== origin) {
       throw new Error(
         "The workspace base URL changed. Close the exploration session before opening another."
       );
+    }
     if (request.action === "open") {
       const destination = httpTarget(
         new URL(request.url ?? baseUrl, baseUrl).toString()
       );
-      if (!policy.origins.includes(destination.origin))
+      if (!policy.origins.includes(destination.origin)) {
         throw new Error("Navigation outside the workspace origin is blocked");
+      }
       await ensureBrowser();
       refs.clear();
       await page!.goto(destination.toString(), {
@@ -397,21 +449,26 @@ export async function startBrowserDaemon(
       return snapshot();
     }
     const current = assertOrigin();
-    if (request.action === "snapshot") return snapshot();
-    if (request.action === "check")
+    if (request.action === "snapshot") {
+      return snapshot();
+    }
+    if (request.action === "check") {
       return safe(await checkPageLocators(current, request.source ?? ""));
-    if (!request.ref)
+    }
+    if (!request.ref) {
       throw new Error(
         `${request.action} requires an element ref or inspection selector`
       );
+    }
     if (request.action === "inspect") {
       const target = /^(?:aria-ref=)?(?:f\d+)?e\d+$/.test(request.ref)
         ? await reference(request.ref)
         : current.locator(request.ref);
-      if ((await target.count()) !== 1)
+      if ((await target.count()) !== 1) {
         throw new Error(
           "Inspection needs one matching element. Use a unique selector or a fresh element ref."
         );
+      }
       const inspected = await target.evaluate(inspectElement);
       assertOrigin();
       return safe({
@@ -422,12 +479,15 @@ export async function startBrowserDaemon(
     }
     const target = await reference(request.ref);
     const previousUrl = current.url();
-    if (request.action === "click") await target.click();
-    else if (request.action === "fill") {
-      if (request.secret && request.value !== undefined)
+    if (request.action === "click") {
+      await target.click();
+    } else if (request.action === "fill") {
+      if (request.secret && request.value !== undefined) {
         throw new Error("Use either --secret or a value when filling a field");
-      if (!request.secret && request.value === undefined)
+      }
+      if (!request.secret && request.value === undefined) {
         throw new Error("fill requires a value or --secret profile.field");
+      }
       if (
         request.secret &&
         !(await secretOrigins(request.secret, baseUrl)).includes(
@@ -473,7 +533,9 @@ export async function startBrowserDaemon(
         connection.destroy();
         return;
       }
-      if (!input.includes("\n")) return;
+      if (!input.includes("\n")) {
+        return;
+      }
       connection.removeAllListeners("data");
       queue = queue
         .then(async () => {
@@ -493,8 +555,9 @@ export async function startBrowserDaemon(
               `${JSON.stringify({ ok: false, error: message })}\n`
             );
           }
-          if (action === "close")
+          if (action === "close") {
             connection.once("close", () => void shutdown());
+          }
         })
         .catch(() => {
           connection.destroy();
@@ -505,7 +568,9 @@ export async function startBrowserDaemon(
     server.once("error", reject);
     server.listen(socket, resolve);
   });
-  if (process.platform !== "win32") await fs.chmod(socket, 0o600);
+  if (process.platform !== "win32") {
+    await fs.chmod(socket, 0o600);
+  }
   touch();
   process.once("SIGTERM", () => void shutdown());
   process.once("SIGINT", () => void shutdown());

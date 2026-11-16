@@ -44,10 +44,14 @@ export default function JoinPage() {
       { method: "POST", body: JSON.stringify({ token: token.current }) }
     )
       .then((result) => {
-        if (active) setInvitation(result);
+        if (active) {
+          setInvitation(result);
+        }
       })
       .catch((reason) => {
-        if (active) setError(errorMessage(reason));
+        if (active) {
+          setError(errorMessage(reason));
+        }
       });
     return () => {
       active = false;

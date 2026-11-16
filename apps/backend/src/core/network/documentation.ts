@@ -20,10 +20,11 @@ export async function readApiDocumentation(
 ) {
   options.signal?.throwIfAborted();
   const url = httpTarget(value);
-  if (!options.origins.includes(url.origin))
+  if (!options.origins.includes(url.origin)) {
     throw new Error(
       "This documentation origin is not allowed. Add it in Settings → Environments, then try again."
     );
+  }
   const address = await resolveTarget(
     url,
     options.allowPrivate,

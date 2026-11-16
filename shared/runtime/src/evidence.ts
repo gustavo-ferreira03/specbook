@@ -129,7 +129,9 @@ async function readText(
 ): Promise<string | null> {
   try {
     const stat = await fs.lstat(source);
-    if (!stat.isFile() || stat.size > maxBytes) return null;
+    if (!stat.isFile() || stat.size > maxBytes) {
+      return null;
+    }
     return await fs.readFile(source, "utf8");
   } catch {
     return null;
@@ -139,7 +141,9 @@ async function readText(
 async function copyFile(source: string, destination: string): Promise<boolean> {
   try {
     const stat = await fs.lstat(source);
-    if (!stat.isFile()) return false;
+    if (!stat.isFile()) {
+      return false;
+    }
     await fs.copyFile(source, destination);
     return true;
   } catch {
@@ -162,10 +166,16 @@ export async function writeRunEvidence(
     const match = new RegExp(`^${STEP_ATTACHMENT_PREFIX}(\\d{2,3})$`).exec(
       attachment.name
     );
-    if (!match || !["image/png", "image/webp"].includes(attachment.contentType))
+    if (
+      !match ||
+      !["image/png", "image/webp"].includes(attachment.contentType)
+    ) {
       continue;
+    }
     const number = Number(match[1]);
-    if (steps.some((step) => step.number === number)) continue;
+    if (steps.some((step) => step.number === number)) {
+      continue;
+    }
     const extension = attachment.contentType === "image/webp" ? "webp" : "png";
     const file = `evidence/step-${match[1]}.${extension}`;
     if (await copyFile(attachment.path, path.join(outputDir, file))) {
@@ -204,7 +214,9 @@ export async function writeRunEvidence(
     ).exec(attachment.name);
     if (apiMatch && attachment.contentType === "application/json") {
       const text = await readText(attachment.path, 1_000_000);
-      if (!text) continue;
+      if (!text) {
+        continue;
+      }
       try {
         const parsed = z
           .array(apiRequestEvidenceSchema)
@@ -243,7 +255,9 @@ export async function writeRunEvidence(
         if (data) {
           await fs.writeFile(path.join(outputDir, REPLAY_FILE), data);
           manifest.replay = { file: REPLAY_FILE, bytes: data.length };
-        } else manifest.replayUnavailable = REPLAY_LIMIT_NOTE;
+        } else {
+          manifest.replayUnavailable = REPLAY_LIMIT_NOTE;
+        }
       } catch {
         manifest.replayUnavailable = "Replay could not be recorded.";
       }
@@ -252,31 +266,40 @@ export async function writeRunEvidence(
       attachment.contentType === "text/plain"
     ) {
       const text = await readText(attachment.path, 500);
-      if (text) manifest.replayUnavailable = scrub(text).slice(0, 500);
+      if (text) {
+        manifest.replayUnavailable = scrub(text).slice(0, 500);
+      }
     } else if (
       attachment.name === "specbook-diagnostics" &&
       attachment.contentType === "application/json"
     ) {
       const text = await readText(attachment.path, 1_000_000);
-      if (!text) continue;
+      if (!text) {
+        continue;
+      }
       try {
         const diagnostics = z
           .array(runDiagnosticSchema)
           .max(100)
           .safeParse(scrubJson(JSON.parse(text), scrub));
-        if (diagnostics.success) manifest.diagnostics = diagnostics.data;
+        if (diagnostics.success) {
+          manifest.diagnostics = diagnostics.data;
+        }
       } catch {}
     } else if (
       status !== "passed" &&
       ["specbook-error-context", "error-context"].includes(attachment.name)
     ) {
-      if (!attachment.contentType.startsWith("text/")) continue;
+      if (!attachment.contentType.startsWith("text/")) {
+        continue;
+      }
       const text = await readText(attachment.path, 1_000_000);
-      if (text)
+      if (text) {
         manifest.errorContext = [manifest.errorContext, scrub(text)]
           .filter(Boolean)
           .join("\n\n")
           .slice(0, 32_000);
+      }
     }
   }
   manifest.apiSteps?.sort((left, right) => left.number - right.number);

@@ -33,9 +33,12 @@ function recordedInputValues(events: { data?: unknown }[]): string[] {
     attributes?: Record<string, unknown>;
     childNodes?: unknown[];
   }) => {
-    if (["input", "textarea"].includes(String(node.tagName)))
+    if (["input", "textarea"].includes(String(node.tagName))) {
       values.push(node.attributes?.value);
-    for (const child of node.childNodes ?? []) collect(child as typeof node);
+    }
+    for (const child of node.childNodes ?? []) {
+      collect(child as typeof node);
+    }
   };
   for (const event of events) {
     const data = event.data as
@@ -47,11 +50,18 @@ function recordedInputValues(events: { data?: unknown }[]): string[] {
           attributes?: { attributes: Record<string, unknown> }[];
         }
       | undefined;
-    if (data?.node) collect(data.node);
-    for (const add of data?.adds ?? []) collect(add.node);
-    for (const change of data?.attributes ?? [])
+    if (data?.node) {
+      collect(data.node);
+    }
+    for (const add of data?.adds ?? []) {
+      collect(add.node);
+    }
+    for (const change of data?.attributes ?? []) {
       values.push(change.attributes.value);
-    if (data?.source === 5) values.push(data.text);
+    }
+    if (data?.source === 5) {
+      values.push(data.text);
+    }
   }
   return values.filter((value): value is string => typeof value === "string");
 }
@@ -322,13 +332,14 @@ describe(
                 attributes?: Record<string, string>;
                 childNodes?: unknown[];
               }): Promise<void> {
-                if (node.tagName === "img" && node.attributes?.id)
+                if (node.tagName === "img" && node.attributes?.id) {
                   initial[node.attributes.id] = {
                     size: node.attributes.rr_dataURL
                       ? await inspect.dimensions(node.attributes.rr_dataURL)
                       : null,
                     id: node.id,
                   };
+                }
                 await Promise.all(
                   (node.childNodes ?? []).map((child) =>
                     inspect.visit(child as Parameters<typeof inspect.visit>[0])
@@ -363,16 +374,19 @@ describe(
             const updates: Record<string, number[]> = {};
             for (const event of events) {
               for (const change of event.data.attributes ?? []) {
-                if (!change.attributes.rr_dataURL) continue;
+                if (!change.attributes.rr_dataURL) {
+                  continue;
+                }
                 const element = (
                   target.rrweb.record.mirror as {
                     getNode: (id: number) => Element | null;
                   }
                 ).getNode(change.id);
-                if (element?.id)
+                if (element?.id) {
                   updates[element.id] = await inspect.dimensions(
                     change.attributes.rr_dataURL
                   );
+                }
               }
             }
             images.stop();
@@ -403,7 +417,9 @@ describe(
               const element = player
                 .getMirror()
                 .getNode(image.id) as HTMLImageElement;
-              if (element.src) await element.decode().catch(() => undefined);
+              if (element.src) {
+                await element.decode().catch(() => undefined);
+              }
               replayBoxes[name] = inspect.box(element);
             }
             player.destroy();
@@ -572,8 +588,9 @@ describe(
                   const a = context.getImageData(ax, ay, 140, 30).data,
                     b = context.getImageData(bx, by, 140, 30).data;
                   let total = 0;
-                  for (let index = 0; index < a.length; index++)
+                  for (let index = 0; index < a.length; index++) {
                     total += Math.abs(a[index] - b[index]);
+                  }
                   differences[name] = total / a.length;
                 }
                 return {
@@ -587,11 +604,12 @@ describe(
             assert.equal(pixels.width, 600);
             assert.equal(pixels.height, 300);
             const { pageText, publicText, ...inputs } = pixels.differences;
-            for (const [name, value] of Object.entries(inputs))
+            for (const [name, value] of Object.entries(inputs)) {
               assert.ok(
                 value < 3,
                 `${name} input renders as password dots (${value})`
               );
+            }
             assert.ok(pageText < 3, "sensitive values in page text are hidden");
             assert.ok(publicText < 3, "non-sensitive page text stays visible");
             assert.equal(
@@ -1347,8 +1365,9 @@ describe(
             let attempt = 0;
             attempt < 60 && (await listening(childStack.port));
             attempt++
-          )
+          ) {
             await new Promise((resolve) => setTimeout(resolve, 50));
+          }
           assert.equal(
             await listening(childStack.port),
             false,
@@ -1358,8 +1377,9 @@ describe(
             let attempt = 0;
             attempt < 60 && (await fs.stat(lock).catch(() => null));
             attempt++
-          )
+          ) {
             await new Promise((resolve) => setTimeout(resolve, 50));
+          }
           assert.equal(
             await fs.stat(lock).catch(() => null),
             null,
@@ -1380,8 +1400,9 @@ describe(
             "stop waits until the sockets are closed"
           );
         } finally {
-          if (owner?.exitCode === null && owner.signalCode === null)
+          if (owner?.exitCode === null && owner.signalCode === null) {
             owner.kill("SIGTERM");
+          }
           await Promise.all(stacks.map((stack) => stopVncStack(stack.id)));
         }
       }

@@ -30,7 +30,9 @@ export class CodedError extends Error {
 }
 
 export function errorCodeOf(error: unknown): ErrorCode | undefined {
-  if (!error || typeof error !== "object") return undefined;
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
   const value = error as {
     code?: unknown;
     errorCode?: unknown;
@@ -46,22 +48,31 @@ export function errorCodeOf(error: unknown): ErrorCode | undefined {
 
 export function providerErrorCode(error: unknown): ErrorCode {
   const known = errorCodeOf(error);
-  if (known) return known;
+  if (known) {
+    return known;
+  }
   const value =
     error && typeof error === "object"
       ? (error as { status?: number; statusCode?: number; code?: string })
       : {};
   const status = value.status ?? value.statusCode;
-  if (status === 401 || status === 403) return "provider_auth";
-  if (status === 429) return "provider_limit";
-  if (status === 404) return "provider_model";
+  if (status === 401 || status === 403) {
+    return "provider_auth";
+  }
+  if (status === 429) {
+    return "provider_limit";
+  }
+  if (status === 404) {
+    return "provider_model";
+  }
   if (
     (status && status >= 500) ||
     ["ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "ENOTFOUND"].includes(
       value.code ?? ""
     )
-  )
+  ) {
     return "provider_connection";
+  }
   return "provider_error";
 }
 
@@ -71,10 +82,16 @@ export function isInfrastructureCode(code: ErrorCode): boolean {
 
 export function specErrorCode(error: unknown): ErrorCode {
   const known = errorCodeOf(error);
-  if (known) return known;
+  if (known) {
+    return known;
+  }
   if (error && typeof error === "object") {
-    if ("matcherResult" in error) return "assertion";
-    if ("name" in error && error.name === "TimeoutError") return "locator";
+    if ("matcherResult" in error) {
+      return "assertion";
+    }
+    if ("name" in error && error.name === "TimeoutError") {
+      return "locator";
+    }
   }
   return "failed";
 }

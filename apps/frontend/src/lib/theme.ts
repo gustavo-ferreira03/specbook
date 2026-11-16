@@ -25,7 +25,9 @@ function systemPrefersDark(): boolean {
 }
 
 export function resolveTheme(preference: ThemePreference): ResolvedTheme {
-  if (preference === "system") return systemPrefersDark() ? "dark" : "light";
+  if (preference === "system") {
+    return systemPrefersDark() ? "dark" : "light";
+  }
   return preference;
 }
 
@@ -37,9 +39,11 @@ function applyTheme(preference: ThemePreference) {
 
 export function setThemePreference(preference: ThemePreference) {
   try {
-    if (preference === "system")
+    if (preference === "system") {
       window.localStorage.removeItem(THEME_STORAGE_KEY);
-    else window.localStorage.setItem(THEME_STORAGE_KEY, preference);
+    } else {
+      window.localStorage.setItem(THEME_STORAGE_KEY, preference);
+    }
   } catch {}
   applyTheme(preference);
   window.dispatchEvent(new Event(THEME_EVENT));
@@ -48,11 +52,15 @@ export function setThemePreference(preference: ThemePreference) {
 function subscribe(onChange: () => void) {
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   const handleSystem = () => {
-    if (readPreference() === "system") applyTheme("system");
+    if (readPreference() === "system") {
+      applyTheme("system");
+    }
     onChange();
   };
   const handleStorage = (event: StorageEvent) => {
-    if (event.key !== THEME_STORAGE_KEY) return;
+    if (event.key !== THEME_STORAGE_KEY) {
+      return;
+    }
     applyTheme(readPreference());
     onChange();
   };

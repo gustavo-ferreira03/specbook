@@ -6,7 +6,9 @@ export function isInfrastructureFailure(
   text: string,
   code?: ErrorCode | null
 ): boolean {
-  if (code) return isInfrastructureCode(code);
+  if (code) {
+    return isInfrastructureCode(code);
+  }
   return (
     INFRASTRUCTURE_FAILURE.test(text) ||
     /\b(?:Your model provider|The model provider could not|Specbook could not reach your model provider|Specbook could not complete this conversation turn|The selected model is unavailable|This conversation turn took too long|The browser (?:could not start|did not start in time|process stopped before it was ready|could not inspect its open tabs|could not confirm (?:or inspect )?(?:the current|the application) page address)|The current browser snapshot could not be read|Browser is already in use)\b/i.test(
@@ -105,10 +107,12 @@ export function oauthFailureMessage(error: unknown): string {
     return "Sign-in was cancelled or expired. Start sign-in again.";
   }
   const failure = providerFailure(error);
-  if (failure.code === "provider_auth")
+  if (failure.code === "provider_auth") {
     return "The provider could not authorize sign-in. Start sign-in again and check your account's access.";
-  if (failure.code !== "provider_error")
+  }
+  if (failure.code !== "provider_error") {
     return `${failure.message} ${failure.nextStep}`;
+  }
   return "Sign-in could not be completed. Start sign-in again.";
 }
 
@@ -141,7 +145,9 @@ export function isCredentialFailure(
   code?: ErrorCode | null,
   context: "triage" | "prerequisite" = "triage"
 ): boolean {
-  if (code) return code === "credentials" || code === "credential_origin";
+  if (code) {
+    return code === "credentials" || code === "credential_origin";
+  }
   return context === "triage"
     ? /credential|session|login|sign.in|authentication|credencia|sessão/i.test(
         text
@@ -160,8 +166,9 @@ export function runFailureKind(run: {
       ["environment", "credentials", "credential_origin"].includes(
         run.errorCode
       )
-    )
+    ) {
       return "environment";
+    }
     return run.errorCode === "assertion" || run.errorCode === "locator"
       ? run.errorCode
       : "failed";

@@ -17,8 +17,9 @@ export { isInside } from "@specbook/runtime/safe-fs";
 function runDirectory(runId: string): string {
   const root = path.resolve(runsDir);
   const directory = path.resolve(root, runId);
-  if (path.dirname(directory) !== root)
+  if (path.dirname(directory) !== root) {
     throw new HTTPException(400, { message: "Invalid run id" });
+  }
   return directory;
 }
 
@@ -29,12 +30,17 @@ export async function realRunDirectory(runId: string): Promise<string | null> {
       fs.realpath(runsDir),
       fs.realpath(directory),
     ]);
-    if (realDirectory !== path.join(root, runId))
+    if (realDirectory !== path.join(root, runId)) {
       throw new HTTPException(400, { message: "Invalid artifact path" });
+    }
     return realDirectory;
   } catch (error) {
-    if (error instanceof HTTPException) throw error;
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (error instanceof HTTPException) {
+      throw error;
+    }
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
     throw error;
   }
 }
@@ -53,16 +59,20 @@ export async function listArtifactFiles(
     const artifact = relative
       ? path.posix.join(relative, entry.name)
       : entry.name;
-    if (entry.isDirectory())
+    if (entry.isDirectory()) {
       files.push(...(await listArtifactFiles(directory, artifact)));
-    else if (entry.isFile()) files.push(artifact);
+    } else if (entry.isFile()) {
+      files.push(artifact);
+    }
   }
   return files;
 }
 
 export async function readRunEvidence(runId: string) {
   const run = await runsRepository.getRun(runId);
-  if (!run) throw new HTTPException(404, { message: "Run not found" });
+  if (!run) {
+    throw new HTTPException(404, { message: "Run not found" });
+  }
   const directory = await realRunDirectory(runId);
   const files = directory ? await listArtifactFiles(directory) : [];
   const available = new Set(files);
@@ -89,7 +99,9 @@ export async function readRunEvidence(runId: string) {
     : manifest.steps.length;
   const currentOrder = stepCount === plan.length;
   const steps = manifest.steps.flatMap((item) => {
-    if (!available.has(item.file)) return [];
+    if (!available.has(item.file)) {
+      return [];
+    }
     const number = item.number;
     const planned = currentOrder
       ? plan[item.number - 1]

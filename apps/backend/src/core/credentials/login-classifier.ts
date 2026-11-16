@@ -77,18 +77,35 @@ export function classifyLoginControl(
     .toLowerCase()
     .split(/\s+/)
     .filter(Boolean);
-  if (tokens.some((token) => EXCLUDED_AUTOCOMPLETE.has(token))) return null;
+  if (tokens.some((token) => EXCLUDED_AUTOCOMPLETE.has(token))) {
+    return null;
+  }
   const exact = LOGIN_TOKENS.find((token) => tokens.includes(token));
-  if (exact) return { control, score: 100, token: exact };
+  if (exact) {
+    return { control, score: 100, token: exact };
+  }
   const text = searchable(control);
-  if (EXCLUDED_PASSWORD.test(text)) return null;
-  if (control.type === "password")
+  if (EXCLUDED_PASSWORD.test(text)) {
+    return null;
+  }
+  if (control.type === "password") {
     return { control, score: 90, token: "current-password" };
-  if (control.type === "email") return { control, score: 85, token: "email" };
-  if (control.type === "tel") return { control, score: 85, token: "tel" };
-  if (EMAIL.test(text)) return { control, score: 75, token: "email" };
-  if (TEL.test(text)) return { control, score: 75, token: "tel" };
-  if (USERNAME.test(text)) return { control, score: 70, token: "username" };
+  }
+  if (control.type === "email") {
+    return { control, score: 85, token: "email" };
+  }
+  if (control.type === "tel") {
+    return { control, score: 85, token: "tel" };
+  }
+  if (EMAIL.test(text)) {
+    return { control, score: 75, token: "email" };
+  }
+  if (TEL.test(text)) {
+    return { control, score: 75, token: "tel" };
+  }
+  if (USERNAME.test(text)) {
+    return { control, score: 70, token: "username" };
+  }
   return null;
 }
 
@@ -103,12 +120,16 @@ export function classifyOtpControls(
     ) {
       return [{ control, score: 100, token: "one-time-code" }];
     }
-    if (!CODE_TYPES.includes(control.type)) return [];
+    if (!CODE_TYPES.includes(control.type)) {
+      return [];
+    }
     return OTP.test(searchable(control))
       ? [{ control, score: 70, token: "one-time-code" }]
       : [];
   });
-  if (matched.length > 0) return matched;
+  if (matched.length > 0) {
+    return matched;
+  }
   const boxes = controls
     .filter(
       (control) => control.maxLength === 1 && CODE_TYPES.includes(control.type)
@@ -126,12 +147,13 @@ export function classifyOtpControls(
     const next = boxes[boxes.indexOf(box) + 1];
     const ends =
       !next || next.index - box.index !== 1 || next.formIndex !== box.formIndex;
-    if (ends && run.length >= 4 && run.length <= 8)
+    if (ends && run.length >= 4 && run.length <= 8) {
       return run.map((control) => ({
         control,
         score: 60,
         token: "one-time-code",
       }));
+    }
   }
   return [];
 }
@@ -152,12 +174,13 @@ export function selectLoginFills(
   const password = best(
     classified.filter((item) => item.token === "current-password")
   );
-  if (password && values.password)
+  if (password && values.password) {
     fills.push({
       index: password.control.index,
       token: password.token,
       value: values.password,
     });
+  }
   const identifiers = classified.filter(
     (item) => item.token !== "current-password"
   );
@@ -167,12 +190,13 @@ export function selectLoginFills(
       )
     : [];
   const identifier = best(sameForm.length > 0 ? sameForm : identifiers);
-  if (identifier && values.identifier)
+  if (identifier && values.identifier) {
     fills.push({
       index: identifier.control.index,
       token: identifier.token,
       value: values.identifier,
     });
+  }
   return fills;
 }
 
@@ -190,12 +214,13 @@ export function selectOtpFills(
       (box, i) =>
         i === 0 || box.control.index - boxes[i - 1].control.index === 1
     );
-  if (perDigit)
+  if (perDigit) {
     return boxes.map((box, i) => ({
       index: box.control.index,
       token: "one-time-code",
       value: code[i],
     }));
+  }
   const top = best(otpControls);
   return top
     ? [{ index: top.control.index, token: "one-time-code", value: code }]
@@ -260,9 +285,13 @@ export function fillFunction(
 }
 
 export function parsePageControls(value: unknown): PageControl[] {
-  if (!Array.isArray(value)) return [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
   return value.flatMap((raw) => {
-    if (!raw || typeof raw !== "object") return [];
+    if (!raw || typeof raw !== "object") {
+      return [];
+    }
     const item = raw as Record<string, unknown>;
     return [
       {

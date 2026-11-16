@@ -51,9 +51,12 @@ export async function removeInactiveBrowserData(
     pending.has(chatId) ||
     closing.has(chatId) ||
     deletingChats.has(chatId)
-  )
+  ) {
     return false;
-  if (!tryReserveChatTurn(chatId)) return false;
+  }
+  if (!tryReserveChatTurn(chatId)) {
+    return false;
+  }
   try {
     await fs.rm(directory, { recursive: true, force: true });
     return true;
@@ -69,9 +72,11 @@ function touchChatBrowser(chatId: string, browser: ChatBrowser): void {
       isChatBusy(chatId) ||
       browser.activeTools.size > 0 ||
       hasVncViewers(browser.vnc.id)
-    )
+    ) {
       touchChatBrowser(chatId, browser);
-    else void closeChatBrowser(chatId);
+    } else {
+      void closeChatBrowser(chatId);
+    }
   }, BROWSER_IDLE_MS);
   browser.idleTimer.unref();
 }
@@ -79,12 +84,18 @@ function touchChatBrowser(chatId: string, browser: ChatBrowser): void {
 export async function getChatBrowser(
   chatId: string
 ): Promise<ChatBrowser | null> {
-  if (deletingChats.has(chatId)) return null;
+  if (deletingChats.has(chatId)) {
+    return null;
+  }
   const browser = browsers.get(chatId);
-  if (!browser) return null;
+  if (!browser) {
+    return null;
+  }
   const turnActive = isChatBusy(chatId);
   if (!getVncSession(browser.vnc.id)) {
-    if (!turnActive) void closeChatBrowser(chatId);
+    if (!turnActive) {
+      void closeChatBrowser(chatId);
+    }
     return null;
   }
   if (!turnActive && Date.now() - browser.lastHealthCheck >= 5000) {
@@ -106,7 +117,9 @@ export async function getOrCreateChatBrowser(
   environment?: RunEnvironment
 ): Promise<ChatBrowser> {
   await closing.get(chatId);
-  if (deletingChats.has(chatId)) throw new Error("Chat is being deleted");
+  if (deletingChats.has(chatId)) {
+    throw new Error("Chat is being deleted");
+  }
   const navigationPolicy = `${environment?.executor === "tunnel" ? environment.id : "server"}:${[...new Set(navigationOrigins)].sort().join(";")}`;
   const existing = browsers.get(chatId);
   if (existing) {
@@ -176,7 +189,9 @@ export async function getOrCreateChatBrowser(
     } catch (error) {
       await proxy?.close();
       await stopVncStack(vnc.id);
-      if (deletingChats.has(chatId)) throw error;
+      if (deletingChats.has(chatId)) {
+        throw error;
+      }
       throw error instanceof BrowserUnavailableError
         ? error
         : new BrowserUnavailableError(error);
@@ -192,9 +207,13 @@ export async function getOrCreateChatBrowser(
 
 export async function closeChatBrowser(chatId: string): Promise<void> {
   const inFlight = closing.get(chatId);
-  if (inFlight) return inFlight;
+  if (inFlight) {
+    return inFlight;
+  }
   const record = browsers.get(chatId);
-  if (!record) return;
+  if (!record) {
+    return;
+  }
   browsers.delete(chatId);
   record.activeTools.clear();
   clearTimeout(record.idleTimer);
@@ -217,7 +236,9 @@ export async function closeChatBrowser(chatId: string): Promise<void> {
 
 export function beginChatBrowserTool(chatId: string, toolName: string): void {
   const browser = browsers.get(chatId);
-  if (!browser) return;
+  if (!browser) {
+    return;
+  }
   browser.activeTools.set(
     toolName,
     (browser.activeTools.get(toolName) ?? 0) + 1
@@ -227,10 +248,15 @@ export function beginChatBrowserTool(chatId: string, toolName: string): void {
 
 export function endChatBrowserTool(chatId: string, toolName: string): void {
   const browser = browsers.get(chatId);
-  if (!browser) return;
+  if (!browser) {
+    return;
+  }
   const count = browser.activeTools.get(toolName) ?? 0;
-  if (count <= 1) browser.activeTools.delete(toolName);
-  else browser.activeTools.set(toolName, count - 1);
+  if (count <= 1) {
+    browser.activeTools.delete(toolName);
+  } else {
+    browser.activeTools.set(toolName, count - 1);
+  }
   touchChatBrowser(chatId, browser);
 }
 
@@ -247,8 +273,9 @@ export function cancelChatBrowserDeletion(chatId: string): void {
 export async function removeChatBrowserData(chatId: string): Promise<void> {
   const root = path.resolve(storageRoot, "chat", "browser");
   const directory = path.resolve(root, chatId);
-  if (path.dirname(directory) !== root)
+  if (path.dirname(directory) !== root) {
     throw new Error("Invalid chat browser directory");
+  }
   await fs.rm(directory, { recursive: true, force: true });
 }
 

@@ -91,7 +91,9 @@ export async function createLocalMcpServer(
     turnId = turn.id;
     selection = turn.selected;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
   let completed = false;
   let listedCredentials = false;
@@ -101,7 +103,9 @@ export async function createLocalMcpServer(
     );
     completed = true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
   const server = new Server(
     { name: "specbook", version: CLI_VERSION },
@@ -129,14 +133,17 @@ export async function createLocalMcpServer(
     await writeState("state.json", state);
   };
   async function assertCurrentTurn(): Promise<void> {
-    if (!turnId) return;
+    if (!turnId) {
+      return;
+    }
     const current = turnContextSchema.parse(
       JSON.parse(await fs.readFile(path.join(session, "turn.json"), "utf8"))
     );
-    if (current.id !== turnId)
+    if (current.id !== turnId) {
       throw new Error(
         "This conversation turn was replaced; no further tools may be called"
       );
+    }
   }
   async function writeState(name: string, value: unknown): Promise<void> {
     await assertCurrentTurn();
@@ -165,10 +172,11 @@ export async function createLocalMcpServer(
         : []),
       ...(outcome.status === "failed" ? [outcome.error] : []),
     ].join("\n");
-    if (await containsSecret(text))
+    if (await containsSecret(text)) {
       throw new Error(
         "Credential values cannot appear in conversation replies; use profile and field names only"
       );
+    }
     await writeState("outcome.json", outcome);
     completed = true;
     return { status: outcome.status, ended: true };
@@ -242,7 +250,9 @@ export async function createLocalMcpServer(
         await safeWorkspacePath(workspace, "specs"),
         { withFileTypes: true }
       )) {
-        if (!feature.isDirectory()) continue;
+        if (!feature.isDirectory()) {
+          continue;
+        }
         const relative = `specs/${feature.name}/feature.yml`;
         try {
           features.push({
@@ -300,19 +310,23 @@ export async function createLocalMcpServer(
     "Create or replace a feature.yml, spec.yml or spec.ts under .specbook/specs. Rejects credential values.",
     z.strictObject({ path: filePath, content: z.string().max(200_000) }),
     async ({ path: relative, content }) => {
-      if (await containsSecret(content))
+      if (await containsSecret(content)) {
         throw new Error(
           "Credential values cannot be written to Specs; use secret(profile, field)"
         );
-      if (relative.endsWith("feature.yml")) parseFeatureYaml(content);
+      }
+      if (relative.endsWith("feature.yml")) {
+        parseFeatureYaml(content);
+      }
       if (relative.endsWith("spec.yml")) {
         const checked = agentHumanSpecSchema.safeParse(
           parseSpecYaml(content).humanSpec
         );
-        if (!checked.success)
+        if (!checked.success) {
           throw new Error(
             `spec.yml is incomplete: ${z.prettifyError(checked.error)}. State the expected result the user sees.`
           );
+        }
       }
       const file = await safeWorkspacePath(workspace, relative, true);
       await fs.mkdir(path.dirname(file), { recursive: true });
@@ -331,7 +345,9 @@ export async function createLocalMcpServer(
       } finally {
         await handle.close();
       }
-      if (!state.writes.includes(relative)) state.writes.push(relative);
+      if (!state.writes.includes(relative)) {
+        state.writes.push(relative);
+      }
       (state.writeEvents ??= []).push(relative);
       await save();
       return { path: relative, written: true };
@@ -355,34 +371,39 @@ export async function createLocalMcpServer(
         if (
           proposalNumber === undefined ||
           !selection.some((proposal) => proposal.number === proposalNumber)
-        )
+        ) {
           throw new Error(
             "Pass a proposalNumber from this turn's selected proposals when running its Spec"
           );
+        }
         if (
           Object.entries(state.proposalRuns ?? {}).some(
             ([number, selectedPath]) =>
               selectedPath === relative && number !== String(proposalNumber)
           )
-        )
+        ) {
           throw new Error(
             "Each selected proposal must run a distinct Spec; this path already belongs to another proposal"
           );
-      } else if (proposalNumber !== undefined)
+        }
+      } else if (proposalNumber !== undefined) {
         throw new Error(
           "This turn has no selected proposals; omit proposalNumber"
         );
+      }
       await readSpec(workspace, relative);
-      if ((state.attempts[relative] ?? 0) >= 3)
+      if ((state.attempts[relative] ?? 0) >= 3) {
         throw new Error(
           "This Spec has reached the three-run limit; report the observed failure instead of retrying"
         );
+      }
       state.attempts[relative] = (state.attempts[relative] ?? 0) + 1;
       await save();
       const run = await runLocal(workspace, relative, { signal });
       state.runs.push(run);
-      if (proposalNumber !== undefined)
+      if (proposalNumber !== undefined) {
         (state.proposalRuns ??= {})[String(proposalNumber)] = relative;
+      }
       await save();
       return {
         ...run,
@@ -422,10 +443,11 @@ export async function createLocalMcpServer(
     "End the turn asking the human to add a missing local profile; give profile and field names only.",
     outcomeToolSchemas.request_credentials,
     async ({ message, profile, fields }) => {
-      if (!listedCredentials)
+      if (!listedCredentials) {
         throw new Error(
           "Call credentials_list in this turn before requesting credentials"
         );
+      }
       const available = (await listProfiles()).find(
         (item) => item.name === profile
       );
@@ -486,12 +508,15 @@ export async function createLocalMcpServer(
     try {
       signal?.throwIfAborted();
       await assertCurrentTurn();
-      if (completed)
+      if (completed) {
         throw new Error(
           "This conversation turn has already ended; no further tools may be called"
         );
+      }
       const selected = tools.find((tool) => tool.name === params.name);
-      if (!selected) throw new Error("Unknown Specbook tool");
+      if (!selected) {
+        throw new Error("Unknown Specbook tool");
+      }
       const result = await selected.execute(params.arguments ?? {});
       return {
         content: [

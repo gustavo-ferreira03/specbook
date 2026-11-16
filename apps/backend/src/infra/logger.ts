@@ -10,14 +10,18 @@ const LEVELS: Record<LogLevel, number> = {
 
 function configuredLevel(): number {
   const value = process.env.LOG_LEVEL?.toLowerCase();
-  if (value === "silent") return Number.POSITIVE_INFINITY;
+  if (value === "silent") {
+    return Number.POSITIVE_INFINITY;
+  }
   return value && value in LEVELS ? LEVELS[value as LogLevel] : LEVELS.info;
 }
 
 const threshold = configuredLevel();
 
 function serializeError(error: unknown, depth = 0): unknown {
-  if (!(error instanceof Error)) return error;
+  if (!(error instanceof Error)) {
+    return error;
+  }
   return {
     name: error.name,
     message: error.message,
@@ -29,7 +33,9 @@ function serializeError(error: unknown, depth = 0): unknown {
 }
 
 function write(level: LogLevel, message: string, fields?: LogFields): void {
-  if (LEVELS[level] < threshold) return;
+  if (LEVELS[level] < threshold) {
+    return;
+  }
   const entry: LogFields = {
     time: new Date().toISOString(),
     level,
