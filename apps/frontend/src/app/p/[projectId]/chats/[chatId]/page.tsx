@@ -168,11 +168,7 @@ const MARKDOWN_COMPONENTS: Components = {
   ),
 };
 
-const MessageContent = memo(function MessageContent({
-  content,
-}: {
-  content: string;
-}) {
+const MessageContent = memo(({ content }: { content: string }) => {
   return (
     <ReactMarkdown
       remarkPlugins={REMARK_PLUGINS}
@@ -425,181 +421,188 @@ interface MessageHandlers {
   onRetry: (messageId: string) => void;
 }
 
-const MessageItem = memo(function MessageItem({
-  message,
-  first,
-  editing,
-  editingText,
-  actionBusy,
-  copied,
-  actionsDisabled,
-  handlers,
-}: {
-  message: ChatMessage;
-  first: boolean;
-  editing: boolean;
-  editingText: string;
-  actionBusy: boolean;
-  copied: boolean;
-  actionsDisabled: boolean;
-  handlers: MessageHandlers;
-}) {
-  const userMessage = message.role === "user";
-  const spacing = first ? "" : "mt-3";
-  const actions = !editing && (
-    <MessageActions
-      userMessage={userMessage}
-      retryable={userMessage || message.canRetry !== false}
-      disabled={actionsDisabled}
-      copied={copied}
-      createdAt={message.createdAt}
-      onCopy={() => handlers.onCopy(message)}
-      onEdit={() => handlers.onStartEdit(message)}
-      onRetry={() => handlers.onRetry(message.id)}
-    />
-  );
+const MessageItem = memo(
+  ({
+    message,
+    first,
+    editing,
+    editingText,
+    actionBusy,
+    copied,
+    actionsDisabled,
+    handlers,
+  }: {
+    message: ChatMessage;
+    first: boolean;
+    editing: boolean;
+    editingText: string;
+    actionBusy: boolean;
+    copied: boolean;
+    actionsDisabled: boolean;
+    handlers: MessageHandlers;
+  }) => {
+    const userMessage = message.role === "user";
+    const spacing = first ? "" : "mt-3";
+    const actions = !editing && (
+      <MessageActions
+        userMessage={userMessage}
+        retryable={userMessage || message.canRetry !== false}
+        disabled={actionsDisabled}
+        copied={copied}
+        createdAt={message.createdAt}
+        onCopy={() => handlers.onCopy(message)}
+        onEdit={() => handlers.onStartEdit(message)}
+        onRetry={() => handlers.onRetry(message.id)}
+      />
+    );
 
-  if (userMessage) {
+    if (userMessage) {
+      return (
+        <article
+          className={cn("group flex flex-col items-end", spacing)}
+          aria-label="You said"
+        >
+          {editing ? (
+            <form
+              onSubmit={handlers.onSubmitEdit}
+              className="border-line-strong bg-surface shadow-composer w-full max-w-[min(100%,560px)] rounded-2xl border p-2"
+            >
+              <Textarea
+                value={editingText}
+                onChange={(event) =>
+                  handlers.onEditTextChange(event.target.value)
+                }
+                rows={3}
+                autoFocus
+                className="text-body min-h-20 resize-y border-0 bg-transparent px-2 shadow-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0"
+                aria-label="Edit message"
+              />
+              <div className="flex items-center justify-between gap-2 pt-1 pl-2">
+                <p className="text-meta text-ink-subtle">
+                  Saving replaces this message and asks again.
+                </p>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handlers.onCancelEdit}
+                  >
+                    <X size={13} /> Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={!editingText.trim() || actionBusy}
+                  >
+                    {actionBusy ? "Saving…" : "Save and retry"}
+                  </Button>
+                </div>
+              </div>
+            </form>
+          ) : (
+            <div className="bg-primary text-body text-primary-foreground [&_blockquote]:border-primary-foreground/40 [&_code]:border-primary-foreground/25 [&_pre]:border-primary-foreground/25 w-fit max-w-[min(88%,560px)] rounded-2xl rounded-br-md px-4 py-2.5 leading-[1.6] [overflow-wrap:anywhere] break-words select-text [&_*]:text-inherit [&_a]:underline [&_a]:decoration-current/50 [&_a]:underline-offset-2 [&_code]:bg-transparent [&_pre]:bg-transparent">
+              <MessageContent content={message.content} />
+            </div>
+          )}
+          {actions}
+        </article>
+      );
+    }
+
     return (
       <article
-        className={cn("group flex flex-col items-end", spacing)}
-        aria-label="You said"
+        className={cn("group flex items-start gap-3", spacing)}
+        aria-label="Specbook said"
       >
-        {editing ? (
-          <form
-            onSubmit={handlers.onSubmitEdit}
-            className="border-line-strong bg-surface shadow-composer w-full max-w-[min(100%,560px)] rounded-2xl border p-2"
-          >
-            <Textarea
-              value={editingText}
-              onChange={(event) =>
-                handlers.onEditTextChange(event.target.value)
-              }
-              rows={3}
-              autoFocus
-              className="text-body min-h-20 resize-y border-0 bg-transparent px-2 shadow-none hover:border-transparent focus-visible:border-transparent focus-visible:ring-0"
-              aria-label="Edit message"
-            />
-            <div className="flex items-center justify-between gap-2 pt-1 pl-2">
-              <p className="text-meta text-ink-subtle">
-                Saving replaces this message and asks again.
-              </p>
-              <div className="flex shrink-0 items-center gap-1.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handlers.onCancelEdit}
-                >
-                  <X size={13} /> Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={!editingText.trim() || actionBusy}
-                >
-                  {actionBusy ? "Saving…" : "Save and retry"}
-                </Button>
-              </div>
-            </div>
-          </form>
-        ) : (
-          <div className="bg-primary text-body text-primary-foreground [&_blockquote]:border-primary-foreground/40 [&_code]:border-primary-foreground/25 [&_pre]:border-primary-foreground/25 w-fit max-w-[min(88%,560px)] rounded-2xl rounded-br-md px-4 py-2.5 leading-[1.6] [overflow-wrap:anywhere] break-words select-text [&_*]:text-inherit [&_a]:underline [&_a]:decoration-current/50 [&_a]:underline-offset-2 [&_code]:bg-transparent [&_pre]:bg-transparent">
+        <AgentAvatar />
+        <div className="min-w-0 flex-1">
+          <p className="text-control text-ink mb-1 flex h-7 items-center font-semibold">
+            Specbook
+          </p>
+          <div className="text-body text-ink max-w-full overflow-x-auto leading-[1.65] [overflow-wrap:anywhere] break-words select-text">
             <MessageContent content={message.content} />
           </div>
-        )}
-        {actions}
+          {actions}
+        </div>
       </article>
     );
   }
+);
 
-  return (
-    <article
-      className={cn("group flex items-start gap-3", spacing)}
-      aria-label="Specbook said"
-    >
-      <AgentAvatar />
-      <div className="min-w-0 flex-1">
-        <p className="text-control text-ink mb-1 flex h-7 items-center font-semibold">
-          Specbook
-        </p>
-        <div className="text-body text-ink max-w-full overflow-x-auto leading-[1.65] [overflow-wrap:anywhere] break-words select-text">
-          <MessageContent content={message.content} />
-        </div>
-        {actions}
-      </div>
-    </article>
-  );
-});
-
-const MessageList = memo(function MessageList({
-  messages,
-  steps,
-  busy,
-  editingMessageId,
-  editingText,
-  actionMessageId,
-  copiedMessageId,
-  actionsDisabled,
-  handlers,
-  results,
-}: {
-  messages: ChatMessage[];
-  steps: ToolStep[];
-  busy: boolean;
-  editingMessageId: string;
-  editingText: string;
-  actionMessageId: string;
-  copiedMessageId: string;
-  actionsDisabled: boolean;
-  handlers: MessageHandlers;
-  results: Map<string | null, ReactNode>;
-}) {
-  const groups = new Map<string | null, ToolStep[]>();
-  const messageIds = new Set(messages.map((message) => message.id));
-  const pending: ToolStep[] = [];
-  for (const step of steps) {
-    if (step.afterMessageId !== null && !messageIds.has(step.afterMessageId)) {
-      pending.push(step);
-      continue;
+const MessageList = memo(
+  ({
+    messages,
+    steps,
+    busy,
+    editingMessageId,
+    editingText,
+    actionMessageId,
+    copiedMessageId,
+    actionsDisabled,
+    handlers,
+    results,
+  }: {
+    messages: ChatMessage[];
+    steps: ToolStep[];
+    busy: boolean;
+    editingMessageId: string;
+    editingText: string;
+    actionMessageId: string;
+    copiedMessageId: string;
+    actionsDisabled: boolean;
+    handlers: MessageHandlers;
+    results: Map<string | null, ReactNode>;
+  }) => {
+    const groups = new Map<string | null, ToolStep[]>();
+    const messageIds = new Set(messages.map((message) => message.id));
+    const pending: ToolStep[] = [];
+    for (const step of steps) {
+      if (
+        step.afterMessageId !== null &&
+        !messageIds.has(step.afterMessageId)
+      ) {
+        pending.push(step);
+        continue;
+      }
+      const group = groups.get(step.afterMessageId) ?? [];
+      group.push(step);
+      groups.set(step.afterMessageId, group);
     }
-    const group = groups.get(step.afterMessageId) ?? [];
-    group.push(step);
-    groups.set(step.afterMessageId, group);
+    return (
+      <div
+        className="flex flex-col"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label="Conversation"
+      >
+        <TurnActivity steps={groups.get(null) ?? []} busy={busy} />
+        {results.get(null)}
+        {messages.map((message, index) => {
+          const editing = editingMessageId === message.id;
+          return (
+            <div key={message.id}>
+              <MessageItem
+                message={message}
+                first={index === 0}
+                editing={editing}
+                editingText={editing ? editingText : ""}
+                actionBusy={actionMessageId === message.id}
+                copied={copiedMessageId === message.id}
+                actionsDisabled={actionsDisabled}
+                handlers={handlers}
+              />
+              <TurnActivity steps={groups.get(message.id) ?? []} busy={busy} />
+              {results.get(message.id)}
+            </div>
+          );
+        })}
+        <TurnActivity steps={pending} busy={busy} />
+      </div>
+    );
   }
-  return (
-    <div
-      className="flex flex-col"
-      role="log"
-      aria-live="polite"
-      aria-relevant="additions"
-      aria-label="Conversation"
-    >
-      <TurnActivity steps={groups.get(null) ?? []} busy={busy} />
-      {results.get(null)}
-      {messages.map((message, index) => {
-        const editing = editingMessageId === message.id;
-        return (
-          <div key={message.id}>
-            <MessageItem
-              message={message}
-              first={index === 0}
-              editing={editing}
-              editingText={editing ? editingText : ""}
-              actionBusy={actionMessageId === message.id}
-              copied={copiedMessageId === message.id}
-              actionsDisabled={actionsDisabled}
-              handlers={handlers}
-            />
-            <TurnActivity steps={groups.get(message.id) ?? []} busy={busy} />
-            {results.get(message.id)}
-          </div>
-        );
-      })}
-      <TurnActivity steps={pending} busy={busy} />
-    </div>
-  );
-});
+);
 
 function ChatContent({
   projectId,

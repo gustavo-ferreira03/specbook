@@ -107,7 +107,7 @@ export function hardenFunctionConstructors(): void {
   };
   const prototypes = [
     Function.prototype,
-    Object.getPrototypeOf(async function prototypes() {}),
+    Object.getPrototypeOf(async () => {}),
     Object.getPrototypeOf(function* prototypes() {}),
     Object.getPrototypeOf(async function* prototypes() {}),
   ];

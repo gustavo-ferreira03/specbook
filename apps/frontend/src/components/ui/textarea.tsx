@@ -7,7 +7,7 @@ import { fieldClasses } from "./input";
 const Textarea = React.forwardRef<
   HTMLTextAreaElement,
   React.ComponentProps<"textarea">
->(function Textarea({ className, ...props }, ref) {
+>(({ className, ...props }, ref) => {
   return (
     <textarea
       ref={ref}
