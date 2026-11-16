@@ -6,11 +6,11 @@ const LABEL = "••••";
 
 function xmlEscaped(value: string, quotes: boolean): string {
   const escaped = value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
   return quotes
-    ? escaped.replace(/"/g, "&quot;").replace(/'/g, "&#x27;")
+    ? escaped.replaceAll('"', "&quot;").replaceAll("'", "&#x27;")
     : escaped;
 }
 

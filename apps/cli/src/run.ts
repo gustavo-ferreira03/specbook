@@ -48,7 +48,7 @@ export async function runLocal(
   await ensureChromium();
   options.signal?.throwIfAborted();
   const startedAt = new Date().toISOString();
-  const id = `${startedAt.replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
+  const id = `${startedAt.replaceAll(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
   const directory = await safeWorkspacePath(workspace, `runs/${id}`, true);
   await fs.mkdir(directory, { recursive: true });
   const selected: SuiteSpec[] = [];

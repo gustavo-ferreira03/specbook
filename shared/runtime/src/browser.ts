@@ -48,7 +48,7 @@ export function redactUrls(value: unknown): unknown {
   if (typeof value !== "string") {
     return value;
   }
-  return value.replace(/https?:\/\/[^\s"'<>]+/g, (value) => {
+  return value.replaceAll(/https?:\/\/[^\s"'<>]+/g, (value) => {
     try {
       const url = new URL(value);
       url.username = "";

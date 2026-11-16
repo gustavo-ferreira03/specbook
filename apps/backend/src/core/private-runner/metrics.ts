@@ -56,9 +56,9 @@ export function prometheusQueueMetrics(
 ): string {
   const label = (value: string | null) =>
     (value ?? "")
-      .replace(/\\/g, "\\\\")
-      .replace(/\n/g, "\\n")
-      .replace(/"/g, '\\"');
+      .replaceAll("\\", "\\\\")
+      .replaceAll("\n", "\\n")
+      .replaceAll('"', '\\"');
   return [
     "# HELP specbook_runner_queue_depth Number of Specs waiting for a runner.",
     "# TYPE specbook_runner_queue_depth gauge",

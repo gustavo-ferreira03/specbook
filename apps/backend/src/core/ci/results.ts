@@ -108,17 +108,19 @@ export async function ciResult(
 export type CiResult = Awaited<ReturnType<typeof ciResult>>;
 
 function xml(value: string) {
-  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").replace(
-    /[<>&"']/g,
-    (char) =>
-      ({
-        "<": "&lt;",
-        ">": "&gt;",
-        "&": "&amp;",
-        '"': "&quot;",
-        "'": "&apos;",
-      })[char]!
-  );
+  return value
+    .replaceAll(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+    .replaceAll(
+      /[<>&"']/g,
+      (char) =>
+        ({
+          "<": "&lt;",
+          ">": "&gt;",
+          "&": "&amp;",
+          '"': "&quot;",
+          "'": "&apos;",
+        })[char]!
+    );
 }
 
 export function junitResult(result: CiResult): string {
@@ -152,7 +154,7 @@ export function junitResult(result: CiResult): string {
 }
 
 const markdown = (value: string) =>
-  value.replace(/[\\`*_{}[\]<>|]/g, "\\$&").replace(/[\r\n]+/g, " ");
+  value.replaceAll(/[\\`*_{}[\]<>|]/g, "\\$&").replaceAll(/[\r\n]+/g, " ");
 
 export function markdownResult(result: CiResult): string {
   const lines = [`## Specbook: ${result.status}`, ""];

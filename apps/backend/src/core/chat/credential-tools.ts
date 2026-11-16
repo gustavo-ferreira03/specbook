@@ -118,10 +118,10 @@ function handleFor(label: string, origin: string): string {
     new URL(origin).hostname.replace(/^www\./, "").split(".")[0];
   const slug = source
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replaceAll(/[̀-ͯ]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^[^a-z]+|-+$/g, "")
+    .replaceAll(/[^a-z0-9_-]+/g, "-")
+    .replaceAll(/^[^a-z]+|-+$/g, "")
     .slice(0, 40);
   return SECRET_NAME_PATTERN.test(slug) ? slug : "login";
 }
@@ -656,7 +656,7 @@ export function createCredentialTools(options: CredentialToolOptions) {
                 "The user did not enter a code. Do not ask again this turn.",
             });
           }
-          code = outcome.code.replace(/[\s-]/g, "");
+          code = outcome.code.replaceAll(/[\s-]/g, "");
         }
         registerTransientSecret(options.projectId, code);
         const value = code;

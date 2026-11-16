@@ -100,7 +100,7 @@ export function createStewardRouter(): Hono {
       const intent = await withProjectLock(id, async () => {
         const jobs = await jobsRepository.list(id);
         const normalize = (value: string) =>
-          value.replace(/\s+/g, " ").trim().toLowerCase();
+          value.replaceAll(/\s+/g, " ").trim().toLowerCase();
         const existing = (await stewardRepository.intents(id)).find(
           (row) =>
             row.source === "user" &&

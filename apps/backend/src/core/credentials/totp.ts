@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 function decodeBase32(input: string): Buffer {
-  const clean = input.toUpperCase().replace(/[\s=-]/g, "");
+  const clean = input.toUpperCase().replaceAll(/[\s=-]/g, "");
   let bits = 0;
   let value = 0;
   const bytes: number[] = [];

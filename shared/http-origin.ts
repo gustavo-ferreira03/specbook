@@ -67,7 +67,7 @@ export function isAllowedHost(
   }
   return (
     allowlist.any ||
-    isIP(url.hostname.replace(/^\[|\]$/g, "")) !== 0 ||
+    isIP(url.hostname.replaceAll(/^\[|\]$/g, "")) !== 0 ||
     allowlist.exact.has(url.host) ||
     allowlist.anyPort.has(url.hostname)
   );

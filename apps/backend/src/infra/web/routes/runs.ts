@@ -40,8 +40,8 @@ function reportHeaders(
   const file = `specbook-${
     name
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
+      .replaceAll(/[^a-z0-9]+/g, "-")
+      .replaceAll(/^-|-$/g, "")
       .slice(0, 60) || "report"
   }.html`;
   return {

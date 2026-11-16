@@ -67,16 +67,16 @@ const secretVariants = [
   ...new Set(
     secretValues.flatMap((value) => {
       const escaped = value
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
       return [
         value,
         encodeURIComponent(value),
         JSON.stringify(value).slice(1, -1),
         escaped,
-        escaped.replace(/"/g, "&quot;").replace(/'/g, "&#39;"),
-        escaped.replace(/"/g, "&quot;").replace(/'/g, "&#x27;"),
+        escaped.replaceAll('"', "&quot;").replaceAll("'", "&#39;"),
+        escaped.replaceAll('"', "&quot;").replaceAll("'", "&#x27;"),
       ];
     })
   ),

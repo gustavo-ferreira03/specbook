@@ -1,12 +1,12 @@
 export function slugify(value: string): string {
   const slug = value
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replaceAll(/[̀-ͯ]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-+|-+$/g, "")
     .slice(0, 60)
-    .replace(/-+$/g, "");
+    .replaceAll(/-+$/g, "");
   return slug || "untitled";
 }
 
@@ -23,6 +23,6 @@ export function uniqueSlug(
 }
 
 export function humanizeSlug(slug: string): string {
-  const words = slug.replace(/-+/g, " ").trim();
+  const words = slug.replaceAll(/-+/g, " ").trim();
   return words ? words[0].toUpperCase() + words.slice(1) : "Untitled";
 }

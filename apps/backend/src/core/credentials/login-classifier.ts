@@ -60,9 +60,9 @@ export function loginFieldKeys(keys: string[]): {
 function normalize(value: string): string {
   return value
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replaceAll(/[̀-ͯ]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replaceAll(/[^a-z0-9]+/g, " ")
     .trim();
 }
 

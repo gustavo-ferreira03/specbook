@@ -426,7 +426,7 @@ export async function chatResults(chatId: string) {
           ? `${taskVerbs[kind] ?? "Review"} “${spec.title}”`
           : goal.split("\n")[0]!
       )
-      .replace(/\s+/g, " ")
+      .replaceAll(/\s+/g, " ")
       .trim()
       .slice(0, 160);
   };

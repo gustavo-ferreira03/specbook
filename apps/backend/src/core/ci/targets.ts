@@ -39,7 +39,7 @@ export async function projectRunPolicy(
   if (selected.executor === "runner" || selected.executor === "tunnel") {
     return { origins, allowPrivate: true };
   }
-  const hostname = base.hostname.replace(/^\[|\]$/g, "");
+  const hostname = base.hostname.replaceAll(/^\[|\]$/g, "");
   const allowPrivate = isIP(hostname)
     ? isPrivateAddress(hostname)
     : hostname === "localhost" || hostname.endsWith(".localhost");

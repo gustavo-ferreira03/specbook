@@ -6,11 +6,13 @@ import type { ReplayEvent } from "./replay.ts";
 export function offlineReplay(value: unknown): unknown {
   if (typeof value === "string") {
     return value
-      .replace(/@import\s+(?:url\([^)]*\)|["'][^"']*["'])[^;]*;?/gi, "")
-      .replace(/url\(\s*(["']?)(.*?)\1\s*\)/gi, (_match, _quote, url: string) =>
-        /^(?:data:|#)/i.test(url.trim())
-          ? `url("${url.trim().replace(/"/g, "%22")}")`
-          : 'url("data:,")'
+      .replaceAll(/@import\s+(?:url\([^)]*\)|["'][^"']*["'])[^;]*;?/gi, "")
+      .replaceAll(
+        /url\(\s*(["']?)(.*?)\1\s*\)/gi,
+        (_match, _quote, url: string) =>
+          /^(?:data:|#)/i.test(url.trim())
+            ? `url("${url.trim().replaceAll('"', "%22")}")`
+            : 'url("data:,")'
       );
   }
   if (Array.isArray(value)) {

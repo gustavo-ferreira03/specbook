@@ -116,7 +116,7 @@ pipelines:
 ${Object.entries(env)
   .map(
     ([key, value]) =>
-      `          - export ${key}='${value.replace(/'/g, "'\\''")}'`
+      `          - export ${key}='${value.replaceAll("'", "'\\''")}'`
   )
   .join("\n")}
           - export SPECBOOK_COMMIT_SHA="$BITBUCKET_COMMIT"
@@ -165,7 +165,7 @@ workflows:
 ${Object.entries(env)
   .map(
     ([key, value]) =>
-      `    ${key} = '${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`
+      `    ${key} = '${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`
   )
   .join("\n")}
     SPECBOOK_TOKEN = credentials('specbook-ci-token')

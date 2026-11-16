@@ -57,7 +57,7 @@ function csvCell(value) {
   }
   const text =
     typeof value === "object" ? JSON.stringify(value) : String(value);
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
 function counter(value) {

@@ -182,7 +182,7 @@ async function requestCredentials({ job, tool, args, abort }: ToolCall) {
               .parse(args[1])
               .label?.trim()
               .toLowerCase()
-              .replace(/[^a-z0-9_-]+/g, "-") || "login",
+              .replaceAll(/[^a-z0-9_-]+/g, "-") || "login",
           fields: [
             { key: "username", label: "Email or username" },
             { key: "password", label: "Password" },

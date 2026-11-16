@@ -62,7 +62,7 @@ const badge = (status: string) =>
 const colored = (status: string) =>
   (statusColors[status] ?? pc.dim)(statusLabels[status] ?? status);
 const icon = (status: string) => icons[status as Status] ?? pc.dim("•");
-const width = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "").length;
+const width = (text: string) => text.replaceAll(/\x1b\[[0-9;]*m/g, "").length;
 const pad = (text: string, size: number) =>
   text + " ".repeat(Math.max(0, size - width(text)));
 const columns = () => Math.min(process.stdout.columns || 100, 100);
@@ -86,8 +86,8 @@ const wrap = (text: string, size: number) =>
 // Agents reply in light markdown; style the inline marks instead of printing them.
 const markdown = (text: string) =>
   text
-    .replace(/\*\*([^*\n]+)\*\*/g, (_, bold) => pc.bold(bold))
-    .replace(/`([^`\n]+)`/g, (_, code) => pc.cyan(code));
+    .replaceAll(/\*\*([^*\n]+)\*\*/g, (_, bold) => pc.bold(bold))
+    .replaceAll(/`([^`\n]+)`/g, (_, code) => pc.cyan(code));
 const indent = (text: string, spaces = 2) =>
   text
     .split("\n")
@@ -429,7 +429,7 @@ export function renderBrowse(
     const lines = tree
       .split("\n")
       .map((line) =>
-        line.replace(/\[ref=([^\]]+)\]/g, (_, ref) => pc.cyan(`[${ref}]`))
+        line.replaceAll(/\[ref=([^\]]+)\]/g, (_, ref) => pc.cyan(`[${ref}]`))
       );
     return [head, "", ...lines].join("\n");
   }

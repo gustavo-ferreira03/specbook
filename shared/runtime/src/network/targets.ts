@@ -88,7 +88,7 @@ export async function resolveTarget(
   resolver: AddressResolver = resolveAddresses
 ): Promise<ResolvedAddress> {
   const url = typeof value === "string" ? httpTarget(value) : value;
-  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  const hostname = url.hostname.replaceAll(/^\[|\]$/g, "");
   let timer: ReturnType<typeof setTimeout> | undefined;
   let addresses: ResolvedAddress[];
   try {
@@ -129,7 +129,7 @@ export async function localNetworkPolicy(
   resolver?: AddressResolver
 ): Promise<RunNetworkPolicy> {
   const target = httpTarget(baseUrl);
-  const hostname = target.hostname.replace(/^\[|\]$/g, "");
+  const hostname = target.hostname.replaceAll(/^\[|\]$/g, "");
   const allowPrivate = isIP(hostname)
     ? isPrivateAddress(hostname)
     : hostname === "localhost" || hostname.endsWith(".localhost");

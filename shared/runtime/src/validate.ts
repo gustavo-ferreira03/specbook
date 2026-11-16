@@ -1351,7 +1351,7 @@ export function analyzeSpecSource(
 function comparable(title: string): string {
   return title
     .trim()
-    .replace(/\s+/g, " ")
+    .replaceAll(/\s+/g, " ")
     .replace(/[.;:]+$/, "")
     .toLowerCase();
 }

@@ -162,7 +162,7 @@ function firstBy<T>(
 }
 
 function plainExcerpt(text: string): string | null {
-  const clean = sanitizeTechnicalDetails(text).replace(/\s+/g, " ").trim();
+  const clean = sanitizeTechnicalDetails(text).replaceAll(/\s+/g, " ").trim();
   if (
     !clean ||
     /(?:Error:|Timeout|spec\.ts|spec\.yml|\bjob\b|\bsteward\b|\bbudget\b|\bverification\b|\bcommit\b|\bproposal\b|\bgetByRole\b|[{}]|\[server path\])/i.test(

@@ -214,10 +214,10 @@ export async function initWorkspace(
 export function slugify(title: string): string {
   const slug = title
     .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replaceAll(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-|-$/g, "")
     .slice(0, 100);
   if (!slug) {
     throw new Error("Use a title containing letters or digits");
@@ -324,11 +324,11 @@ export async function specDirectories(
     return directories.sort();
   }
   let selected = selector
-    .replace(/\\/g, "/")
+    .replaceAll("\\", "/")
     .replace(/\/$/, "")
     .replace(/\/(spec\.ts|spec\.yml)$/, "");
   if (path.isAbsolute(selected)) {
-    selected = path.relative(workspace, selected).replace(/\\/g, "/");
+    selected = path.relative(workspace, selected).replaceAll("\\", "/");
   }
   selected = selected.replace(/^\.specbook\//, "").replace(/^\.\//, "");
   const matches = directories.filter(

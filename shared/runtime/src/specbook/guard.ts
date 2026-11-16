@@ -64,7 +64,7 @@ const SECRET_ORIGIN_ERROR =
   "Refusing to type a secret: the current page origin is not allowed for this credential.";
 
 function envSegment(name: string): string {
-  return name.toUpperCase().replace(/-/g, "_");
+  return name.toUpperCase().replaceAll("-", "_");
 }
 
 export function secretEnvName(profileName: string, fieldKey: string): string {

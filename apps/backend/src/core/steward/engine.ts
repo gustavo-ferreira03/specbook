@@ -112,7 +112,7 @@ async function intentFingerprint(
     environment: intent.environment,
     goal:
       source === "user"
-        ? intent.goal.replace(/\s+/g, " ").trim().toLowerCase()
+        ? intent.goal.replaceAll(/\s+/g, " ").trim().toLowerCase()
         : undefined,
     regressionKey: key.startsWith("regression:") ? key : undefined,
   });

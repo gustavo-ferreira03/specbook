@@ -39,7 +39,7 @@ interface Fetched {
 }
 
 function allowsPrivate(baseUrl: URL): boolean {
-  const hostname = baseUrl.hostname.replace(/^\[|\]$/g, "");
+  const hostname = baseUrl.hostname.replaceAll(/^\[|\]$/g, "");
   return isIP(hostname)
     ? isPrivateAddress(hostname)
     : hostname === "localhost" || hostname.endsWith(".localhost");

@@ -183,7 +183,7 @@ const TOOL_COPY: Record<string, ToolCopy> = {
 function fallbackLabel(toolName: string): string {
   const words = toolName
     .replace(/^browser_/, "")
-    .replace(/[_-]+/g, " ")
+    .replaceAll(/[_-]+/g, " ")
     .trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Tool";
 }

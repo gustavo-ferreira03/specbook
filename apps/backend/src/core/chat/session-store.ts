@@ -130,7 +130,7 @@ function sessionTitle(sessionManager: SessionManager): string {
 }
 
 export function chatTitle(text: string): string {
-  let title = text.replace(/\s+/g, " ").trim();
+  let title = text.replaceAll(/\s+/g, " ").trim();
   if (title.length > 60) {
     const space = title.lastIndexOf(" ", 60);
     title = `${title.slice(0, space > 0 ? space : 60)}…`;

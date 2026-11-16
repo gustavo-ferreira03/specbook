@@ -19,9 +19,9 @@ export async function recordBatch(
     }
     const scrub = await projectSecretScrubber(project.id);
     const name = scrub(project.name)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
     notification = {
       webhookUrl: automation.webhookUrl,
       payload: {

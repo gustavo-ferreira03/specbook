@@ -269,7 +269,7 @@ export async function finishOidc(c: Context): Promise<string> {
     const name =
       typeof profile.name === "string"
         ? profile.name
-            .replace(/[\x00-\x1f<>]/g, "")
+            .replaceAll(/[\x00-\x1f<>]/g, "")
             .trim()
             .slice(0, 80)
         : email;

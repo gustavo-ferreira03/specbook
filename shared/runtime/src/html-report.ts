@@ -95,7 +95,7 @@ const ZOOM_SCRIPT = `(() => {
 })();`;
 
 function escape(value: string): string {
-  return value.replace(
+  return value.replaceAll(
     /[&<>"']/g,
     (char) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
@@ -549,7 +549,7 @@ export async function renderHtmlReport(
   const playerStyle = hasReplay ? REPLAY_PLAYER_STYLES : "";
   const reportScript = hasReplay ? await publicAsset("report-replay.js") : "";
   const inlineScript = (script: string) =>
-    script.replace(/<\/script/gi, "<\\/script");
+    script.replaceAll(/<\/script/gi, "<\\/script");
   const results = sections.map((section) => section.item);
   const byFeature = new Map<string, ReportSection[]>();
   for (const entry of sections) {

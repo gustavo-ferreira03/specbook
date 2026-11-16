@@ -77,8 +77,8 @@ test("every endpoint declares access and protected routes deny anonymous request
     }
     const route = routes[0];
     const pathname = route.path
-      .replace(/:\w+(?:\{[^}]+\})?/g, "00000000-0000-4000-8000-000000000000")
-      .replace(/\*/g, "file");
+      .replaceAll(/:\w+(?:\{[^}]+\})?/g, "00000000-0000-4000-8000-000000000000")
+      .replaceAll("*", "file");
     const response = await app.request(`http://localhost:4000${pathname}`, {
       method: route.method,
       headers: { host: "localhost:4000", "X-Specbook-Request": "1" },

@@ -9,7 +9,7 @@ export function fillTemplate(
   template: string,
   values: Record<string, string>
 ): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
+  return template.replaceAll(/\{\{(\w+)\}\}/g, (_match, key: string) => {
     if (!(key in values)) {
       throw new Error(`Missing template value: ${key}`);
     }
