@@ -34,11 +34,11 @@ const profileSchema = z
         Object.hasOwn(profile.fields, field)
       ) ?? true
   );
-export type ProviderProfile = {
+export interface ProviderProfile {
   fields: Record<string, string>;
   origins: string[];
   sensitive?: string[];
-};
+}
 
 export async function providerProfile(
   command: string,

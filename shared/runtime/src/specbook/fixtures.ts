@@ -38,11 +38,11 @@ import { captureStepScreenshot } from "./screenshot.ts";
 type StepFn = (title: string, body: () => Promise<void>) => Promise<void>;
 type SecretFn = (profile: string, field: string) => object;
 type CleanupFn = (body: () => Promise<void>) => Promise<void>;
-type EvidenceState = {
+interface EvidenceState {
   page?: Page;
   apiRequests: ApiRequestEvidence[];
   replay?: ReplayCapture;
-};
+}
 
 hardenFunctionConstructors();
 
@@ -86,21 +86,21 @@ const hasSecret = (value: unknown): boolean =>
   typeof value === "string" &&
   secretVariants.some((secret) => secret && value.includes(secret));
 
-type ReplayNode = {
+interface ReplayNode {
   id?: number;
   type?: number;
   tagName?: string;
   attributes?: Record<string, unknown>;
   childNodes?: ReplayNode[];
-};
+}
 const INPUT_TAGS = new Set(["input", "textarea", "select"]);
-type ReplayMutation = {
+interface ReplayMutation {
   source?: number;
   id?: number;
   text?: unknown;
   adds?: { node: ReplayNode }[];
   attributes?: { id: number; attributes: Record<string, unknown> }[];
-};
+}
 
 class ReplayCapture {
   private events: string[] = [];

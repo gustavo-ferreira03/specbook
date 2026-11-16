@@ -1,15 +1,15 @@
-type ReplayImageMirror = {
+interface ReplayImageMirror {
   getNode: (id: number) => Node | null;
   getId: (node: Node) => number;
-};
+}
 type ImageAttributes = Record<string, unknown>;
-type SerializedImageNode = {
+interface SerializedImageNode {
   id?: number;
   tagName?: string;
   attributes?: ImageAttributes;
   childNodes?: SerializedImageNode[];
-};
-type ImageEvent = {
+}
+interface ImageEvent {
   type?: number;
   data?: {
     node?: SerializedImageNode;
@@ -17,7 +17,7 @@ type ImageEvent = {
     adds?: { node: SerializedImageNode }[];
     attributes?: { id: number; attributes: ImageAttributes }[];
   };
-};
+}
 
 // Serialized into the init script; keep its browser dependencies inside the function.
 export function createReplayImageRecorder(

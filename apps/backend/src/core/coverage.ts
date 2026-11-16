@@ -116,7 +116,10 @@ function testedRoutes(source: string): string[] {
   return [...routes];
 }
 
-type Implementation = { valid: boolean; routes: string[] };
+interface Implementation {
+  valid: boolean;
+  routes: string[];
+}
 const analyses = new Map<
   string,
   { sourceHash: string; markdownHash: string; result: Implementation }

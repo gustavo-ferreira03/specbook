@@ -11,11 +11,11 @@ interface MessageSocket extends EventEmitter {
   send(data: string, callback: (error?: Error) => void): void;
   close(code?: number, reason?: string): void;
 }
-type Pending = {
+interface Pending {
   resolve: (stream: Duplex) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
-};
+}
 
 export class TunnelMultiplexer {
   private streams = new Map<string, Duplex>();

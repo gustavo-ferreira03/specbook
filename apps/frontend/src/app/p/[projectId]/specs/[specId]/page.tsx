@@ -110,7 +110,10 @@ function parseSourceLocation(
   };
 }
 
-type EvidenceSelection = { runId: string; step: RunEvidence["steps"][number] };
+interface EvidenceSelection {
+  runId: string;
+  step: RunEvidence["steps"][number];
+}
 
 function artifactUrl(runId: string, file: string) {
   const path = file.split("/").map(encodeURIComponent).join("/");

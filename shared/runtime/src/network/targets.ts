@@ -8,7 +8,10 @@ export class NetworkTargetError extends CodedError {
     super("environment", message);
   }
 }
-export type ResolvedAddress = { address: string; family: number };
+export interface ResolvedAddress {
+  address: string;
+  family: number;
+}
 export type AddressResolver = (hostname: string) => Promise<ResolvedAddress[]>;
 const resolveAddresses: AddressResolver = (hostname) =>
   lookup(hostname, { all: true, verbatim: true });

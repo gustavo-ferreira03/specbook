@@ -47,11 +47,11 @@ const apiRequestEvidenceSchema = z.object({
   responseBody: z.string().max(4000).optional(),
   error: z.string().max(2000).optional(),
 });
-export type ApiStepEvidence = {
+export interface ApiStepEvidence {
   number: number;
   label: string;
   requests: z.infer<typeof apiRequestEvidenceSchema>[];
-};
+}
 export type ApiRequestEvidence = z.infer<typeof apiRequestEvidenceSchema>;
 
 export interface EvidenceManifest {

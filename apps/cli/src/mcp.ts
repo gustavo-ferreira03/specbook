@@ -69,12 +69,12 @@ const turnContextSchema = z.strictObject({
   id: z.string().uuid(),
   selected: z.array(proposalSchema).optional(),
 });
-type Tool = {
+interface Tool {
   name: string;
   description: string;
   schema: z.ZodObject;
   execute(input: unknown): Promise<unknown>;
-};
+}
 
 export async function createLocalMcpServer(
   workspace: string,

@@ -56,7 +56,10 @@ import { useProjectOverview } from "@/lib/projectOverview";
 import type { OverviewResponse, Project, RecentRun } from "@/lib/types";
 import { useRunnerEnvironment } from "@/lib/useRunnerEnvironment";
 
-type Selection = { type: "item" | "story" | "failure"; id: string };
+interface Selection {
+  type: "item" | "story" | "failure";
+  id: string;
+}
 
 const RUN_TRIGGERS: Record<RecentRun["trigger"], string> = {
   deploy: "Deployments",

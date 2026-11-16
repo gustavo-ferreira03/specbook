@@ -1039,12 +1039,12 @@ describe("first-run setup", () => {
           "The sign-in startup test must not make token requests"
         );
       });
-      type OAuthResult = {
+      interface OAuthResult {
         status: "pending" | "done" | "error";
         url?: string;
         prompt?: { type: string; placeholder?: string };
         error?: string;
-      };
+      }
       async function pollUntil(
         sessionId: string,
         ready: (result: OAuthResult) => boolean
