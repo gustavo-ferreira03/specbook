@@ -552,7 +552,7 @@ class Validator {
         ["http:", "https:"].includes(url.protocol) &&
         !url.username &&
         !url.password &&
-        !/[\\\u0000-\u001f]/.test(target ?? "");
+        !/[\\\u0000-\u001F]/.test(target ?? "");
     } catch {}
     if (target === null || (!isSafeRelativePath(target) && !absolute)) {
       fail(

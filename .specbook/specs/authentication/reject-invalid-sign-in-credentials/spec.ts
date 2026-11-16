@@ -16,7 +16,7 @@ test("Reject invalid sign-in credentials", async ({ page, step }) => {
     await expect(page).toHaveURL(/\/login\?next=%2F$/);
   });
   await step(
-    "The sign-in page shows \u201cEmail or password is incorrect.\u201d",
+    "The sign-in page shows \u201CEmail or password is incorrect.\u201D",
     async () => {
       await expect(
         page.getByText("Email or password is incorrect.", { exact: true })

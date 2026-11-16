@@ -881,7 +881,7 @@ describe(
         assert.equal(result?.status, "failed");
         assert.equal(result?.failedStep, "See the greeting");
         assert.match(result?.failReason ?? "", /toHaveText/);
-        assert.doesNotMatch(result?.failReason ?? "", /\u001b\[/);
+        assert.doesNotMatch(result?.failReason ?? "", /\u001B\[/);
         const evidence = JSON.parse(
           await fs.readFile(path.join(directory, "evidence.json"), "utf-8")
         );

@@ -100,7 +100,7 @@ describe("parsePlaywrightReport", () => {
           errors: [
             {
               message:
-                '\u001b[31mError: expect(locator).toHaveText(expected) failed\u001b[39m\n\nExpected: "Welcome"',
+                '\u001B[31mError: expect(locator).toHaveText(expected) failed\u001B[39m\n\nExpected: "Welcome"',
             },
           ],
           steps: [
@@ -193,13 +193,13 @@ describe("parsePlaywrightReport", () => {
             ],
           },
         ],
-        [{ message: "\u001b[31mError: No tests found\u001b[39m" }]
+        [{ message: "\u001B[31mError: No tests found\u001B[39m" }]
       )
     );
     assert.equal(parsed.files.get("z")?.status, "error");
     assert.deepEqual(parsed.errors, ["Error: No tests found"]);
     assert.throws(() => parsePlaywrightReport("{}"), /no suites/);
-    assert.equal(stripAnsi("\u001b[2mdim\u001b[22m"), "dim");
+    assert.equal(stripAnsi("\u001B[2mdim\u001B[22m"), "dim");
   });
 });
 

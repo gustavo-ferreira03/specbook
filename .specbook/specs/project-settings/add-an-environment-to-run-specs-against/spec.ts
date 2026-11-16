@@ -30,7 +30,7 @@ test("Add an environment to run Specs against", async ({
       page.getByRole("button", { name: "Add environment" })
     ).toBeVisible();
   });
-  await step("Add the environment \u201cSelf-test staging\u201d", async () => {
+  await step("Add the environment \u201CSelf-test staging\u201D", async () => {
     await page.getByRole("button", { name: "Add environment" }).click();
     await page.getByLabel("Name", { exact: true }).fill("Self-test staging");
     await page.getByLabel("Base URL").fill("https://www.saucedemo.com");
@@ -44,7 +44,7 @@ test("Add an environment to run Specs against", async ({
     ).toBeVisible();
   });
   await step(
-    "\u201cSelf-test staging\u201d is offered as a run environment",
+    "\u201CSelf-test staging\u201D is offered as a run environment",
     async () => {
       await page.getByRole("combobox", { name: "Run environment" }).click();
       await expect(

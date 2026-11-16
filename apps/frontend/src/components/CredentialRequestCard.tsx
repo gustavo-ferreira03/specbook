@@ -73,7 +73,7 @@ export function CredentialRequestCard({
             dismiss: "Dismiss",
           }
         : {
-            title: `The agent needs the \u201c${request.profileName}\u201d credential`,
+            title: `The agent needs the \u201C${request.profileName}\u201D credential`,
             note: "Sent to the encrypted store, never into the conversation or the model.",
             submit: "Save credential",
             sending: "Saving…",

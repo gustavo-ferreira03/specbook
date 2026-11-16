@@ -20,7 +20,7 @@ export interface PlaywrightReport {
 
 type Json = Record<string, unknown>;
 
-const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
+const ANSI = /\u001B\[[0-9;]*[A-Za-z]/g;
 
 export function stripAnsi(text: string): string {
   return text.replaceAll(ANSI, "");

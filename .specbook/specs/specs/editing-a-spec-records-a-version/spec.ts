@@ -30,7 +30,7 @@ test("Editing a Spec records a version", async ({
     await expect(page.getByRole("link", { name: "Specs" })).toBeVisible();
   });
   await step(
-    "A Spec \u201cVersioned home check\u201d exists in a new feature",
+    "A Spec \u201CVersioned home check\u201D exists in a new feature",
     async () => {
       await page.getByRole("link", { name: "Specs" }).click();
       await page.getByRole("button", { name: "New feature" }).click();
@@ -53,7 +53,7 @@ test("Editing a Spec records a version", async ({
       );
     }
   );
-  await step("Rename the step to \u201cOpen the storefront\u201d", async () => {
+  await step("Rename the step to \u201COpen the storefront\u201D", async () => {
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByLabel("Steps").fill("Open the storefront");
     await page.getByText("Advanced: automation source").click();
@@ -89,7 +89,7 @@ test("Editing a Spec records a version", async ({
     ).toHaveAttribute("aria-pressed", "true");
   });
   await step(
-    "The oldest version still has the step \u201cOpen the application\u201d",
+    "The oldest version still has the step \u201COpen the application\u201D",
     async () => {
       await expect(
         page

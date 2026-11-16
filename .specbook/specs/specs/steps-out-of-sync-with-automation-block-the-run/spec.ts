@@ -28,7 +28,7 @@ test("Steps out of sync with automation block the run", async ({
     await expect(page.getByRole("link", { name: "Specs" })).toBeVisible();
   });
   await step(
-    "A Spec \u201cUnsynced home check\u201d exists in a new feature",
+    "A Spec \u201CUnsynced home check\u201D exists in a new feature",
     async () => {
       await page.getByRole("link", { name: "Specs" }).click();
       await page.getByRole("button", { name: "New feature" }).click();
@@ -51,7 +51,7 @@ test("Steps out of sync with automation block the run", async ({
       );
     }
   );
-  await step("Rename the step to \u201cOpen the storefront\u201d", async () => {
+  await step("Rename the step to \u201COpen the storefront\u201D", async () => {
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByLabel("Steps").fill("Open the storefront");
     await expect(

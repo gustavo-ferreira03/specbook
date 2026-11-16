@@ -17,7 +17,7 @@ test("Open a Spec and run it to a visible result", async ({
     await expect(page.getByRole("link", { name: "Specs" })).toBeVisible();
   });
   await step(
-    "Open \u201cHome page opens\u201d from the Specs list",
+    "Open \u201CHome page opens\u201D from the Specs list",
     async () => {
       await page.goto("/p/9edbbcfa-523b-4dbc-b02d-f5b746bd48fe/specs");
       await page.getByRole("link", { name: "Home page opens" }).click();
@@ -49,7 +49,7 @@ test("Open a Spec and run it to a visible result", async ({
     await expect(newest.getByText("Passed")).toBeVisible();
   });
   await step(
-    "The Spec still shows its step \u201cOpen the application\u201d",
+    "The Spec still shows its step \u201COpen the application\u201D",
     async () => {
       await expect(
         page

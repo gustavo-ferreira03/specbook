@@ -21,7 +21,7 @@ test("Browse Specs by feature, status, and title", async ({
     );
   });
   await step(
-    "The project has the passing Spec \u201cHome page opens\u201d under Smoke",
+    "The project has the passing Spec \u201CHome page opens\u201D under Smoke",
     async () => {
       await expect(
         page.getByRole("heading", { name: "Specs", level: 1 })
@@ -42,7 +42,7 @@ test("Browse Specs by feature, status, and title", async ({
       page.getByRole("button", { name: /^Passing \d+$/ })
     ).toHaveAttribute("aria-pressed", "true");
   });
-  await step("Search for \u201cHome page opens\u201d", async () => {
+  await step("Search for \u201CHome page opens\u201D", async () => {
     await page
       .getByRole("searchbox", { name: "Filter Specs by title" })
       .fill("Home page opens");
@@ -50,7 +50,7 @@ test("Browse Specs by feature, status, and title", async ({
       page.getByRole("searchbox", { name: "Filter Specs by title" })
     ).toHaveValue("Home page opens");
   });
-  await step("The list shows only \u201cHome page opens\u201d", async () => {
+  await step("The list shows only \u201CHome page opens\u201D", async () => {
     await expect(
       page
         .getByRole("list", { name: "Specs by feature" })

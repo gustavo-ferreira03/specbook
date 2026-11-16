@@ -36,13 +36,13 @@ test("Store a credential profile with hidden values", async ({
       page.getByRole("dialog", { name: "New credential profile" })
     ).toBeVisible();
   });
-  await step("Name it \u201cself-test-shopper\u201d", async () => {
+  await step("Name it \u201Cself-test-shopper\u201D", async () => {
     await page.getByLabel("Profile name").fill("self-test-shopper");
     await expect(page.getByLabel("Profile name")).toHaveValue(
       "self-test-shopper"
     );
   });
-  await step("Enter the username \u201cshopper@example.com\u201d", async () => {
+  await step("Enter the username \u201Cshopper@example.com\u201D", async () => {
     await page.getByLabel("username value").fill("shopper@example.com");
     await expect(page.getByLabel("username sensitive")).not.toBeChecked();
   });

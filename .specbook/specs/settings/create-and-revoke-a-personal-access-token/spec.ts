@@ -31,7 +31,7 @@ test("Create and revoke a personal access token", async ({
     await page.getByRole("menuitem", { name: "Access tokens" }).click();
     await expect(page.getByLabel("Token name")).toBeVisible();
   });
-  await step("Create the token \u201cSelf-test laptop\u201d", async () => {
+  await step("Create the token \u201CSelf-test laptop\u201D", async () => {
     await page.getByLabel("Token name").fill("Self-test laptop");
     await page.getByRole("button", { name: "Create token" }).click();
     await expect(page.getByText("Copy this token now")).toBeVisible();
@@ -44,7 +44,7 @@ test("Create and revoke a personal access token", async ({
         .getByText("Self-test laptop")
     ).toBeVisible();
   });
-  await step("Revoke \u201cSelf-test laptop\u201d", async () => {
+  await step("Revoke \u201CSelf-test laptop\u201D", async () => {
     await page
       .getByRole("button", { name: "Revoke token Self-test laptop" })
       .click();

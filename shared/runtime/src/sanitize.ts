@@ -1,6 +1,6 @@
 export function sanitizeTechnicalDetails(text: string): string {
   return text
-    .replaceAll(/\u001b\[[0-9;]*m/g, "")
+    .replaceAll(/\u001B\[[0-9;]*m/g, "")
     .split("\n")
     .filter(
       (line) =>

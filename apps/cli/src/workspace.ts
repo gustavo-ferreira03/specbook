@@ -214,7 +214,7 @@ export async function initWorkspace(
 export function slugify(title: string): string {
   const slug = title
     .normalize("NFKD")
-    .replaceAll(/[\u0300-\u036f]/g, "")
+    .replaceAll(/[\u0300-\u036F]/g, "")
     .toLowerCase()
     .replaceAll(/[^a-z0-9]+/g, "-")
     .replaceAll(/^-|-$/g, "")

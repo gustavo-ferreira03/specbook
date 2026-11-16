@@ -109,7 +109,7 @@ export type CiResult = Awaited<ReturnType<typeof ciResult>>;
 
 function xml(value: string) {
   return value
-    .replaceAll(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+    .replaceAll(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
     .replaceAll(
       /[<>&"']/g,
       (char) =>

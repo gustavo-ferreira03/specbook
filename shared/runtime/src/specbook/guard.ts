@@ -304,7 +304,7 @@ async function navigate(
 
 export function isSafeRelativePath(value: unknown): value is string {
   return (
-    typeof value === "string" && /^\/(?!\/)[^\\\u0000-\u001f]*$/.test(value)
+    typeof value === "string" && /^\/(?!\/)[^\\\u0000-\u001F]*$/.test(value)
   );
 }
 
@@ -669,7 +669,7 @@ export function createGuard(options: GuardOptions) {
         target: unknown,
         input: unknown = {}
       ) => {
-        if (typeof target !== "string" || /[\\\u0000-\u001f]/.test(target)) {
+        if (typeof target !== "string" || /[\\\u0000-\u001F]/.test(target)) {
           throw new Error("API requests need a literal path or HTTP(S) URL");
         }
         let url = isSafeRelativePath(target)

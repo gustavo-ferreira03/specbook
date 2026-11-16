@@ -30,7 +30,7 @@ test("A failing run shows where it stopped", async ({
     await expect(page.getByRole("link", { name: "Specs" })).toBeVisible();
   });
   await step(
-    "A Spec \u201cBroken home check\u201d exists in a new feature",
+    "A Spec \u201CBroken home check\u201D exists in a new feature",
     async () => {
       await page.getByRole("link", { name: "Specs" }).click();
       await page.getByRole("button", { name: "New feature" }).click();
@@ -87,7 +87,7 @@ test("A failing run shows where it stopped", async ({
     ).toBeVisible({ timeout: 30000 });
   });
   await step(
-    "The automatic retry also failed at \u201cOpen the application\u201d",
+    "The automatic retry also failed at \u201COpen the application\u201D",
     async () => {
       const newest = page
         .getByRole("list", { name: "Runs, newest first" })
