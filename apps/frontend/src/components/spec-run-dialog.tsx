@@ -128,6 +128,7 @@ const BatchDiagnostics = function BatchDiagnostics({
             if (
               evidence.diagnostics?.length ||
               evidence.errorContext ||
+              evidence.cleanupWarning ||
               evidence.apiSteps?.length
             ) {
               return (

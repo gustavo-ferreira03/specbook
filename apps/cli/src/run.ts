@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { cleanupAllowanceMs } from "@specbook/runtime/cleanup";
 import { localNetworkPolicy } from "@specbook/runtime/network/targets";
 import { runPlaywrightSuite } from "@specbook/runtime/playwright";
 import type { SuiteSpec, SuiteSpecResult } from "@specbook/runtime/playwright";
@@ -95,7 +96,7 @@ export const runLocal = async function runLocal(
     directory,
     baseUrl,
     specs: selected,
-    timeoutMs: specs.length * 100_000 + 30_000,
+    timeoutMs: specs.length * 100_000 + 30_000 + cleanupAllowanceMs(selected),
     networkPolicy: policy,
     signal: options.signal,
     ...secrets,

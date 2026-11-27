@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { cleanupAllowanceMs } from "@specbook/runtime/cleanup";
 import type { ErrorCode } from "@specbook/runtime/errors";
 import { CodedError } from "@specbook/runtime/errors";
 import { readEvidenceManifest } from "@specbook/runtime/evidence";
@@ -142,7 +143,11 @@ export const verifyProposal = async function verifyProposal(
     if (remaining < 1000) {
       throw new Error("The investigation has not reached a confirmed result");
     }
-    return Math.min(120_000 * (environment.timeoutScale ?? 1), remaining);
+    return Math.min(
+      (120_000 + cleanupAllowanceMs([analysis])) *
+        (environment.timeoutScale ?? 1),
+      remaining
+    );
   };
   const timeoutMs = await check();
   if (environment.executor === "tunnel") {

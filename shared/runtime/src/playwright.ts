@@ -41,6 +41,7 @@ export interface SuiteSpecResult {
   failReason: string | null;
   failedStep: string | null;
   errorCode?: ErrorCode | null;
+  cleanupWarning?: string;
 }
 
 export interface SuiteOutcome {
@@ -317,7 +318,7 @@ export const runPlaywrightSuite = async function runPlaywrightSuite(
       // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
       await fs.mkdir(spec.outputDir, { recursive: true });
       // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
-      await writeRunEvidence(
+      const manifest = await writeRunEvidence(
         spec.outputDir,
         status,
         safeResult,
@@ -336,6 +337,9 @@ export const runPlaywrightSuite = async function runPlaywrightSuite(
             ? null
             : (safeResult?.errorCode ??
               (processFailure ? "infrastructure" : "failed")),
+        ...(manifest.cleanupWarning
+          ? { cleanupWarning: manifest.cleanupWarning }
+          : {}),
       });
     }
   } finally {

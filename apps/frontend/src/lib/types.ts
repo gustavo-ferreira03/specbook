@@ -293,6 +293,7 @@ export interface RunEvidence {
     status?: number;
   }[];
   errorContext?: string;
+  cleanupWarning?: string | null;
   reportAvailable: boolean;
   reportUrl: string | null;
 }
