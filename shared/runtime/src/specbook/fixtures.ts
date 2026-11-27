@@ -4,6 +4,7 @@ import path from "node:path";
 import { expect as baseExpect, test as base } from "@playwright/test";
 import type { ConsoleMessage, Page, Request, Response } from "@playwright/test";
 
+import { CLEANUP_WARNING_ATTACHMENT, cleanupWarning } from "../cleanup.ts";
 import { specErrorCode } from "../errors.ts";
 import type { RunDiagnostic } from "../evidence.ts";
 import {
@@ -17,6 +18,7 @@ import {
 } from "../replay.ts";
 import type { ReplayEvent } from "../replay.ts";
 import { scrubJson } from "../scrub.ts";
+import { specTimeouts } from "../timeouts.ts";
 import type { ExecutionStepKind } from "../types.ts";
 import { withEvidenceTimeout } from "./evidence-timeout.ts";
 import {
@@ -55,7 +57,6 @@ interface EvidenceState {
 hardenFunctionConstructors();
 
 const runtime = parseRuntime(process.env[RUNTIME_ENV]);
-const CLEANUP_BUDGET_MS = 5000;
 const guard = createGuard({ runtime, readSecret: (name) => process.env[name] });
 
 const secretValues = [
@@ -612,7 +613,8 @@ export const test = base.extend<{
     await use((profile, field) => createSecret(profile, field));
   },
   // Hidden teardown that resets data the Spec created: it runs after the test even when a step failed,
-  // records no evidence and never changes the result. Depending on page and request keeps both open until it ends.
+  // gets as long as the test itself, records no step evidence and never changes the result. A cleanup that
+  // fails or runs out of time leaves a warning on the run. Depending on page and request keeps both open until it ends.
   cleanup: async (
     { page: _page, request: _request, _specbookEvidence },
     use,
@@ -632,22 +634,36 @@ export const test = base.extend<{
     if (_specbookEvidence.page && _specbookEvidence.replay) {
       await stopReplay(_specbookEvidence.page, _specbookEvidence.replay);
     }
-    testInfo.setTimeout(testInfo.timeout + CLEANUP_BUDGET_MS + 1000);
+    const budget = testInfo.timeout || specTimeouts().test;
+    if (testInfo.timeout) {
+      testInfo.setTimeout(testInfo.timeout + budget + 1000);
+    }
     let timer: NodeJS.Timeout | undefined;
+    let problem: string | null = null;
     try {
-      await Promise.race([
+      problem = await Promise.race([
         Promise.resolve()
           .then(registered)
-          .catch(() => {
-            /* Intentionally no work for this callback. */
-          }),
+          .then(() => null)
+          .catch((error: unknown) => cleanupWarning({ error })),
         // oxlint-disable-next-line promise/avoid-new -- Bridge a callback or deadline into a promise; there is no promise-returning operation to await.
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, CLEANUP_BUDGET_MS);
+        new Promise<string>((resolve) => {
+          timer = setTimeout(
+            () => resolve(cleanupWarning({ timeoutMs: budget })),
+            budget
+          );
         }),
       ]);
     } finally {
       clearTimeout(timer);
+    }
+    if (problem) {
+      const file = testInfo.outputPath(`${CLEANUP_WARNING_ATTACHMENT}.txt`);
+      await fs.writeFile(file, problem, "utf-8");
+      await testInfo.attach(CLEANUP_WARNING_ATTACHMENT, {
+        path: file,
+        contentType: "text/plain",
+      });
     }
   },
 });

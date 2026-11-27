@@ -1098,6 +1098,56 @@ describe(
   }
 );
 
+const leftoversTest = function leftoversTest(scenario: {
+  name: string;
+  body: string;
+  timeoutMs: number;
+  warning: RegExp;
+}) {
+  test(
+    `${scenario.name} warns about leftovers and keeps the result`,
+    { timeout: 30_000 },
+    async () => {
+      const directory = tempDir();
+      const output = path.join(directory, "output");
+      const source = `import { test, expect } from "specbook"; test("Leftovers", async ({ page, request, step, cleanup }) => { await cleanup(async () => { ${scenario.body} }); await step("Check the page", async () => { const response = await request.get("/"); await expect(response).toBeOK(); }); });`;
+      const write = fs.writeFile;
+      fs.writeFile = (file, contents, options) =>
+        write(
+          file,
+          String(file).endsWith("playwright.config.mjs")
+            ? String(contents).replace(
+                '"timeout": 100000',
+                `"timeout": ${scenario.timeoutMs}`
+              )
+            : contents,
+          options
+        );
+      let outcome;
+      try {
+        outcome = await runPlaywrightSuite({
+          directory,
+          baseUrl: origin(app),
+          specs: [suiteSpec("leftovers", source, output)],
+          timeoutMs: 25_000,
+          secretEnv: {},
+          secretOrigins: { defaultOrigins: [], byRef: {} },
+          scrub: (value) => value,
+        });
+      } finally {
+        fs.writeFile = write;
+      }
+      const result = outcome.results.get("leftovers");
+      assert.equal(result?.status, "passed");
+      assert.match(result?.cleanupWarning ?? "", scenario.warning);
+      const manifest = JSON.parse(
+        await fs.readFile(path.join(output, "evidence.json"), "utf-8")
+      );
+      assert.equal(manifest.cleanupWarning, result?.cleanupWarning);
+    }
+  );
+};
+
 describe("Playwright runner (API)", () => {
   test(
     "slow cleanup has a separate budget and leaves a passing result intact",
@@ -1115,7 +1165,7 @@ describe("Playwright runner (API)", () => {
               String(file).endsWith("playwright.config.mjs")
                 ? String(contents).replace(
                     '"timeout": 100000',
-                    '"timeout": 3000'
+                    '"timeout": 10000'
                   )
                 : contents,
               options
@@ -1141,6 +1191,7 @@ describe("Playwright runner (API)", () => {
       }
       assert.equal(outcome.processFailure, null);
       assert.equal(outcome.results.get("cleanup")?.status, "passed");
+      assert.equal(outcome.results.get("cleanup")?.cleanupWarning, undefined);
       assert.ok(
         explorationRequests.includes("GET /slow-cleanup"),
         "registered cleanup runs after the check"
@@ -1153,6 +1204,20 @@ describe("Playwright runner (API)", () => {
       );
     }
   );
+
+  leftoversTest({
+    name: "a cleanup that fails",
+    body: 'await expect(page.getByText("Missing record")).toBeVisible({ timeout: 1000 });',
+    timeoutMs: 100_000,
+    warning: /^Cleanup failed: .+ Data created by this Spec may remain\.$/u,
+  });
+  leftoversTest({
+    name: "a cleanup that runs out of time",
+    body: 'await request.get("/slow-cleanup");',
+    timeoutMs: 3000,
+    warning:
+      /^Cleanup did not finish within 3s\. Data created by this Spec may remain\.$/u,
+  });
 
   test(
     "uses no browser page, redacts secret request/response evidence and rejects off-origin redirects",

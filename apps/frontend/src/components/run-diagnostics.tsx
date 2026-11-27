@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, FileCode2, Terminal } from "lucide-react";
+import { ChevronDown, FileCode2, Terminal, TriangleAlert } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -23,12 +23,29 @@ export const RunDiagnostics = function RunDiagnostics({
   evidence: RunEvidence;
 }) {
   const diagnostics = evidence.diagnostics ?? [];
-  if (diagnostics.length === 0 && !evidence.errorContext) {
+  if (
+    diagnostics.length === 0 &&
+    !evidence.errorContext &&
+    !evidence.cleanupWarning
+  ) {
     return null;
   }
 
   return (
     <div className="space-y-3">
+      {evidence.cleanupWarning && (
+        <p
+          role="note"
+          className="text-meta text-ink border-warning bg-warning-soft flex gap-2 rounded-lg border px-3 py-2.5"
+        >
+          <TriangleAlert
+            size={14}
+            aria-hidden="true"
+            className="text-warning-icon mt-0.5 shrink-0"
+          />
+          <span className="min-w-0 break-words">{evidence.cleanupWarning}</span>
+        </p>
+      )}
       {diagnostics.length > 0 && (
         <Collapsible className="group/diagnostics border-line overflow-hidden rounded-lg border">
           <CollapsibleTrigger asChild>

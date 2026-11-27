@@ -139,6 +139,7 @@ export const readRunEvidence = async function readRunEvidence(runId: string) {
     apiSteps: manifest.apiSteps ?? [],
     environment: run.environment,
     errorContext: manifest.errorContext ?? null,
+    cleanupWarning: manifest.cleanupWarning ?? null,
   };
 };
 

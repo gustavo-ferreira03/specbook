@@ -684,6 +684,21 @@ const EvidenceGallery = function EvidenceGallery({
   );
 };
 
+const isEmptyEvidence = function isEmptyEvidence(
+  evidence: RunEvidence
+): boolean {
+  return (
+    evidence.steps.length === 0 &&
+    !evidence.apiSteps?.length &&
+    !evidence.video &&
+    !evidence.replay &&
+    !evidence.replayUnavailable &&
+    !evidence.diagnostics?.length &&
+    !evidence.errorContext &&
+    !evidence.cleanupWarning
+  );
+};
+
 const RunEvidencePanel = function RunEvidencePanel({
   run,
   loaded,
@@ -731,14 +746,7 @@ const RunEvidencePanel = function RunEvidencePanel({
   if (!evidence) {
     return null;
   }
-  const empty =
-    evidence.steps.length === 0 &&
-    !evidence.apiSteps?.length &&
-    !evidence.video &&
-    !evidence.replay &&
-    !evidence.replayUnavailable &&
-    !evidence.diagnostics?.length &&
-    !evidence.errorContext;
+  const empty = isEmptyEvidence(evidence);
   return (
     <div className="space-y-4">
       {evidence.replay && (

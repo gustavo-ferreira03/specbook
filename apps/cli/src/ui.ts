@@ -356,13 +356,16 @@ export const renderRun = function renderRun(run: LocalRun) {
       `  ${pc.bold(feature)}`,
       ...results.map((result) => {
         const line = `    ${icon(result.status)} ${pad(result.title, titleSize)}  ${pc.dim(duration(result.durationMs))}`;
+        const warning = result.cleanupWarning
+          ? `\n${indent(pc.yellow(result.cleanupWarning), 8)}`
+          : "";
         if (result.status === "passed") {
-          return line;
+          return `${line}${warning}`;
         }
         const step = result.failedStep
           ? `${pc.dim("at step")} ${result.failedStep}\n`
           : "";
-        return `${line}\n${indent(step + pc.red(briefReason(result.failReason)), 8)}`;
+        return `${line}\n${indent(step + pc.red(briefReason(result.failReason)), 8)}${warning}`;
       }),
     ].join("\n")
   );

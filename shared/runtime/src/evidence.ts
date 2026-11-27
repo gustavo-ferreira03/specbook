@@ -4,6 +4,10 @@ import path from "node:path";
 import { z } from "zod";
 
 import {
+  CLEANUP_WARNING_ATTACHMENT,
+  CLEANUP_WARNING_LIMIT,
+} from "./cleanup.ts";
+import {
   encodeReplay,
   isReplayEvents,
   MAX_REPLAY_BYTES,
@@ -60,6 +64,7 @@ export interface EvidenceManifest {
   failedStep: string | null;
   diagnostics?: RunDiagnostic[];
   errorContext?: string;
+  cleanupWarning?: string;
   apiSteps?: ApiStepEvidence[];
   replay?: { file: typeof REPLAY_FILE; bytes: number } | null;
   replayUnavailable?: string;
@@ -104,6 +109,7 @@ const evidenceManifestSchema = z.object({
   failedStep: z.string().nullable().default(null),
   diagnostics: z.array(runDiagnosticSchema).max(100).optional(),
   errorContext: z.string().max(32_000).optional(),
+  cleanupWarning: z.string().max(CLEANUP_WARNING_LIMIT).optional(),
   apiSteps: z
     .array(
       z.object({
@@ -316,6 +322,15 @@ export const writeRunEvidence = async function writeRunEvidence(
       } catch {
         /* Cleanup is best effort; preserve the original result. */
         /* Cleanup is best effort; preserve the original result. */
+      }
+    } else if (
+      attachment.name === CLEANUP_WARNING_ATTACHMENT &&
+      attachment.contentType === "text/plain"
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- Each operation depends on the preceding attempt or updates ordered browser/evidence state.
+      const text = await readText(attachment.path, 10_000);
+      if (text) {
+        manifest.cleanupWarning = scrub(text).slice(0, CLEANUP_WARNING_LIMIT);
       }
     } else if (
       status !== "passed" &&

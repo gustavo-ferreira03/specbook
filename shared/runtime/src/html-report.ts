@@ -82,6 +82,7 @@ export interface ReportSection {
   video: string | null;
   replay?: string | null;
   replayUnavailable?: string;
+  cleanupWarning?: string;
 }
 
 // Zoom with a class instead of the :target anchor, so closing doesn't scroll the page; the anchors remain the no-script fallback.
@@ -287,6 +288,9 @@ export const prepareReportSection =
       ...(manifest.replayUnavailable
         ? { replayUnavailable: manifest.replayUnavailable }
         : {}),
+      ...(manifest.cleanupWarning
+        ? { cleanupWarning: manifest.cleanupWarning }
+        : {}),
     };
   };
 
@@ -411,6 +415,7 @@ const renderSection = function renderSection(
     video,
     replay,
     replayUnavailable,
+    cleanupWarning,
   }: ReportSection,
   open = false,
   showPath = false
@@ -432,6 +437,7 @@ const renderSection = function renderSection(
   <span class="time">${escape(duration(item.durationMs))}</span>
 </summary>
 <div class="body">
+  ${cleanupWarning ? `<p class="cleanup-warning" role="note">${escape(cleanupWarning)}</p>` : ""}
   ${preconditions.length ? `<h3>Preconditions</h3>${renderSteps(preconditions, Boolean(replay))}` : ""}
   ${actions.length ? `<h3>Steps</h3>${renderSteps(actions, Boolean(replay))}` : ""}
   ${
@@ -487,6 +493,7 @@ const STYLE = `
 body{margin:0;background:var(--surface);color:var(--ink);font:15px/1.55 Recursive,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-variation-settings:"CASL" .35}
 code,pre,.path,.time,.mono{font-family:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-ligatures:none}
 a{color:inherit}
+.cleanup-warning{border:1px solid var(--warning);border-radius:8px;padding:10px 12px}
 header{background-image:radial-gradient(circle,var(--dot) 1.1px,transparent 1.5px);background-size:24px 24px;border-bottom:1px solid var(--line)}
 .wrap{max-width:960px;margin:0 auto;padding:0 24px}
 .top{padding-top:28px;padding-bottom:32px;background:linear-gradient(to right,var(--surface) 45%,transparent)}

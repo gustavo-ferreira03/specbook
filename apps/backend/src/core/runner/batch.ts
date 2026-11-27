@@ -3,6 +3,7 @@ import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { cleanupAllowanceMs } from "@specbook/runtime/cleanup";
 import { CodedError, errorCodeOf } from "@specbook/runtime/errors";
 import type { ErrorCode } from "@specbook/runtime/errors";
 import { readEvidenceManifest } from "@specbook/runtime/evidence";
@@ -68,12 +69,13 @@ const refsOf = (analysis: SpecAnalysis) =>
   analysis.secretRefs.map((ref) => ref.envName);
 
 const batchTimeout = function batchTimeout(
-  specs: number,
+  specs: Pick<PreparedSpec, "analysis">[],
   environment?: RunEnvironment
 ): number {
   return Math.min(
     MAX_BATCH_TIMEOUT_MS,
-    Math.max(1, specs) * RUN_TIMEOUT_MS * (environment?.timeoutScale ?? 1)
+    (Math.max(1, specs.length) * RUN_TIMEOUT_MS + cleanupAllowanceMs(specs)) *
+      (environment?.timeoutScale ?? 1)
   );
 };
 
@@ -373,7 +375,7 @@ const executeBatch = async function executeBatch(
       delete batch.waitingForTunnelAt;
       await writeBatch(batch);
     }
-    const timeout = batchTimeout(prepared.length, batch.environment);
+    const timeout = batchTimeout(prepared, batch.environment);
     const outcome = await withRunSlot(async () => {
       started = Date.now();
       return runPlaywrightSuite({
@@ -804,8 +806,7 @@ const dispatchRunnerBatch = async function dispatchRunnerBatch(
           requireValue(batch.baseUrl),
           batch.environment
         ),
-        timeoutMs:
-          timeoutMs ?? batchTimeout(prepared.length, batch.environment),
+        timeoutMs: timeoutMs ?? batchTimeout(prepared, batch.environment),
         ...(batch.environment?.timeoutScale &&
         batch.environment.timeoutScale > 1
           ? { timeoutScale: batch.environment.timeoutScale }

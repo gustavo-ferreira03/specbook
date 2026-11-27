@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import { readEvidenceManifest } from "@specbook/runtime/evidence";
 import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
 import { z } from "zod";
@@ -290,6 +291,9 @@ export const createDomainTools = function createDomainTools(
             path.join(runsDir, run.id),
             { status: run.status, failReason, failedStep }
           );
+          const { cleanupWarning } = await readEvidenceManifest(
+            path.join(runsDir, run.id)
+          );
           return text(
             JSON.stringify({
               runId: run.id,
@@ -301,6 +305,9 @@ export const createDomainTools = function createDomainTools(
                 ? truncate(await scrub(failedStep), 200)
                 : null,
               evidenceReview,
+              ...(cleanupWarning
+                ? { cleanupWarning: await scrub(cleanupWarning) }
+                : {}),
               nextStep: (() => {
                 const next = reviewNextStep(evidenceReview);
                 return next && `${next} Then update the Spec and run it again.`;
