@@ -1,6 +1,6 @@
 {
   "name": "specbook",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Specbook behavior contracts, private-network runners and hosted server",
   "bin": {
     "specbook": "dist/index.js"
