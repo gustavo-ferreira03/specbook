@@ -4,6 +4,7 @@ import { describe, test } from "node:test";
 import type { BrowserMcp } from "../../src/core/browser/mcp";
 import {
   chatNavigationOrigins,
+  createAutonomousBrowserPolicy,
   createDiscoveryBrowserPolicy,
   createOriginBrowserPolicy,
   DISCOVERY_BROWSER_TOOLS,
@@ -301,5 +302,20 @@ describe("discovery browser policy", () => {
   test("staying on the origin passes", async () => {
     const { policy } = policyFor(["https://app.example.com/deep/page"]);
     await requireValue(policy.afterCall)("browser_click", {}, "");
+  });
+});
+
+describe("autonomous exploration policy", () => {
+  test("refuses changes without asking for an authorization that cannot help", async () => {
+    const fake = fakeMcp([START_URL]);
+    const policy = createAutonomousBrowserPolicy(START_URL, fake.mcp);
+    await assert.rejects(
+      async () => {
+        await policy.beforeCall?.("browser_fill_form", {}, undefined);
+      },
+      (error: Error) =>
+        /cannot change application data/u.test(error.message) &&
+        !/authorization\. Explain|Inbox/u.test(error.message)
+    );
   });
 });

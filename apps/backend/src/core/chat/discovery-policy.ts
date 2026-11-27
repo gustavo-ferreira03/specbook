@@ -258,7 +258,7 @@ export const createAutonomousBrowserPolicy =
       beforeCall: async (name, args, signal) => {
         if (!allowed.has(name)) {
           throw new Error(
-            "This browser action needs human authorization. Explain the blocker in the Inbox before proceeding."
+            "This autonomous exploration was not requested by a user and cannot change application data, so this action is unavailable here and no answer or authorization changes that. Continue read-only and report what could not be checked."
           );
         }
         await policy.beforeCall?.(name, args, signal);

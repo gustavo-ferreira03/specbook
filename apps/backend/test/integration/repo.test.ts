@@ -1523,6 +1523,57 @@ describe("autonomous job proposals", () => {
     }
   );
 
+  test("work requested from a chat gets the chat's permissions; autonomous exploration stays read-only", async () => {
+    const { jobsRepository } =
+      await import("../../src/infra/repositories/jobs");
+    const { createJobPolicy } = await import("../../src/core/jobs/policy");
+    const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
+    const { Type } = await import("@earendil-works/pi-ai");
+    const projectId = await createProject("Requested job permissions");
+    /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
+    for (const [trigger, scope, direct] of [
+      ["manual", "spec", true],
+      ["steward", "explore", false],
+    ] as const) {
+      const row = await jobsRepository.create({
+        projectId,
+        chatId: crypto.randomUUID(),
+        kind: "explore",
+        trigger,
+        goal: "Create the requested Spec",
+        limits: jobLimitsSchema.parse({}),
+      });
+      const job = requireValue(await jobsRepository.claim(row.id));
+      const policy = createJobPolicy(job, () => {});
+      assert.equal(policy.browserScope, scope);
+      assert.equal(policy.prompt.includes("Requested in a chat"), direct);
+      let ran = false;
+      const tool = requireValue(
+        policy.tools([
+          {
+            name: "create_spec",
+            label: "create_spec",
+            description: "test",
+            parameters: Type.Object({}),
+            execute() {
+              ran = true;
+              return Promise.resolve({
+                content: [{ type: "text" as const, text: "created" }],
+                details: undefined,
+              });
+            },
+          },
+        ])[0]
+      );
+      await tool
+        .execute("call", {}, undefined, undefined, {} as never)
+        .catch(() => null);
+      assert.equal(ran, direct);
+      await jobsRepository.update(job.id, { status: "cancelled" });
+    }
+    /* oxlint-enable no-await-in-loop */
+  });
+
   test("job handlers preserve restrictions and use typed tool failures", async () => {
     const { jobsRepository } =
       await import("../../src/infra/repositories/jobs");

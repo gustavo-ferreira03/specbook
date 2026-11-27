@@ -231,6 +231,9 @@ export const createJobPolicy = function createJobPolicy(
   environment?: RunEnvironment
 ): TurnPolicy {
   const scrub = createProjectScrubber(job.projectId);
+  // Work a user requested from a chat gets the chat's own permissions; only autonomous work stays cautious.
+  const userRequested = USER_TRIGGERS.has(job.trigger);
+  const directMutations = userRequested && DIRECT_KINDS.has(job.kind);
   let actions = job.actionsUsed;
   let pending = Promise.resolve();
   const started = Date.now();
@@ -264,11 +267,11 @@ export const createJobPolicy = function createJobPolicy(
   return {
     baseUrl,
     environment,
-    browserScope: ["failure_triage", "regenerate", "generate_spec"].includes(
-      job.kind
-    )
-      ? "spec"
-      : "explore",
+    browserScope:
+      userRequested ||
+      ["failure_triage", "regenerate", "generate_spec"].includes(job.kind)
+        ? "spec"
+        : "explore",
     async infrastructureFailure(error, code) {
       await retryInfrastructure(job, error, code);
       abort();
@@ -279,7 +282,9 @@ export const createJobPolicy = function createJobPolicy(
         errorCode: null,
       });
     },
-    prompt: `\n${JOB_SYSTEM_PROMPT.replace("{{goal}}", () => job.goal)}`,
+    prompt: `\n${JOB_SYSTEM_PROMPT.replace("{{goal}}", () => job.goal)}${
+      directMutations ? `\n${USER_REQUESTED_JOB_PROMPT}` : ""
+    }`,
     tools(tools) {
       const reportTool = defineTool({
         name: "inbox_report",
@@ -391,7 +396,9 @@ export const createJobPolicy = function createJobPolicy(
             }
             const handler =
               jobHandlers.get(job.kind)?.get(tool.name) ??
-              commonHandlers.get(tool.name) ??
+              (directMutations && DIRECT_TOOLS.has(tool.name)
+                ? executeOriginal
+                : commonHandlers.get(tool.name)) ??
               executeOriginal;
             const output = await handler({
               job,
@@ -447,6 +454,15 @@ export const createJobPolicy = function createJobPolicy(
 };
 
 const JOB_SYSTEM_PROMPT = loadPrompt("job-system-prompt.txt");
+const USER_REQUESTED_JOB_PROMPT = loadPrompt("user-requested-job-prompt.txt");
+const USER_TRIGGERS: ReadonlySet<string> = new Set(["manual", "chat"]);
+// Kinds whose user-requested work creates and changes Specs directly, as in the chat that asked for it.
+const DIRECT_KINDS: ReadonlySet<string> = new Set(["explore", "run_specs"]);
+const DIRECT_TOOLS: ReadonlySet<string> = new Set([
+  "create_spec",
+  "update_spec",
+  "create_feature",
+]);
 
 export const AGENT_RULES_VERSION = 4;
 
