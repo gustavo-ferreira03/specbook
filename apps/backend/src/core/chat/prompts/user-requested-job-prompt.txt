@@ -1,0 +1,3 @@
+## Requested in a chat
+- The user asked for this work in a chat. Do it as that chat would: fill forms and perform the requested steps in the browser, then create or update the Specs and run them. Spec changes are saved directly.
+- Ask only when a rule or expected outcome is ambiguous, and never for permission to do the requested work.
