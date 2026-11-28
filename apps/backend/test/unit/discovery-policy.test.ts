@@ -254,6 +254,29 @@ describe("discovery browser policy", () => {
     );
   });
 
+  test("snapshot references keep working after a navigation prefixes them with the frame sequence", () => {
+    const snapshot =
+      '- button "Entrar" [ref=f1e39]\n- button "Continuar com Google" [ref=f1e17]\n- link "Criar conta" [ref=e39]';
+    assert.equal(snapshotClickTarget(snapshot, "f1e39"), "button Entrar");
+    assert.equal(
+      snapshotClickTarget(snapshot, "aria-ref=f1e17"),
+      "button Continuar com Google"
+    );
+    assert.equal(snapshotClickTarget(snapshot, "e39"), "link Criar conta");
+    assert.throws(
+      () => snapshotClickTarget(snapshot, "f2e39"),
+      /missing or ambiguous/u
+    );
+    assert.throws(
+      () => snapshotClickTarget(snapshot, "Entrar"),
+      /fresh browser snapshot/u
+    );
+    assert.throws(
+      () => snapshotClickTarget(snapshot, "f1e39]"),
+      /fresh browser snapshot/u
+    );
+  });
+
   test("interactive chat keeps tools available but rejects inspecting another origin", async () => {
     const { mcp } = fakeMcp(["https://elsewhere.example/"]);
     const policy = createOriginBrowserPolicy(START_URL, mcp, [

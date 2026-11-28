@@ -13,6 +13,7 @@ import { z } from "zod";
 
 import { logger } from "../../infra/logger";
 import { getSecuritySettings } from "../chat/safety-settings";
+import { ModelCallRecorder } from "../llm/call-log";
 import { configuredModel, modelRuntimePromise } from "../llm/runtime";
 
 export const reviewedScreenshots = function reviewedScreenshots(
@@ -68,6 +69,83 @@ export const reviewNextStep = function reviewNextStep(
   return `The test is wrong, not the app. ${INSPECT_INSTRUCTION}`;
 };
 
+const REVIEW_MAX_TOKENS = 400;
+const REVIEW_TIMEOUT_MS = 60_000;
+
+type ReviewResponse = Awaited<
+  ReturnType<Awaited<typeof modelRuntimePromise>["completeSimple"]>
+>;
+type ReviewContent = (
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string }
+)[];
+
+const reviewText = function reviewText(
+  specYaml: string,
+  specSource: string,
+  manifest: EvidenceManifest,
+  outcome: { status: string; failReason?: string | null },
+  failedStep: string | null | undefined
+): string {
+  return [
+    `spec.yml:\n${specYaml}`,
+    specSource ? `spec.ts:\n${specSource.slice(0, 8000)}` : "",
+    `Result: ${outcome.status}${failedStep ? ` at step "${failedStep}"` : ""}`,
+    outcome.failReason
+      ? `Failure message:\n${outcome.failReason.slice(0, 4000)}`
+      : "",
+    manifest.errorContext
+      ? `Accessibility snapshot at the failure:\n${manifest.errorContext.slice(0, 6000)}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+};
+
+// Appends the step screenshots to the review content and returns how many were attached.
+const attachScreenshots = async function attachScreenshots(
+  directory: string,
+  shown: EvidenceManifest["steps"],
+  content: ReviewContent
+): Promise<number> {
+  let images = 0;
+  for (const step of shown) {
+    if (!isStepScreenshot(step.file)) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+    const bytes = await fs
+      .readFile(path.join(directory, step.file))
+      .catch(() => null);
+    if (!bytes || bytes.byteLength > 4 * 1024 * 1024) {
+      continue;
+    }
+    content.push(
+      { type: "text", text: `Screenshot after step "${step.label}":` },
+      {
+        type: "image",
+        data: bytes.toString("base64"),
+        mimeType: stepScreenshotContentType(step.file),
+      }
+    );
+    images += 1;
+  }
+  return images;
+};
+
+// A response that arrived but could not be used still consumed tokens; a request that threw reports none.
+const failedReviewOutcome = function failedReviewOutcome(
+  response: ReviewResponse | undefined,
+  requested: boolean
+): "provider_error" | "invalid_response" | "failed" {
+  if (response) {
+    return response.stopReason === "error" || response.stopReason === "aborted"
+      ? "provider_error"
+      : "invalid_response";
+  }
+  return requested ? "provider_error" : "failed";
+};
+
 export const reviewRunEvidence = async function reviewRunEvidence(
   directory: string,
   outcome: {
@@ -77,15 +155,28 @@ export const reviewRunEvidence = async function reviewRunEvidence(
   }
 ): Promise<EvidenceReview | null> {
   const cache = path.join(directory, "review.json");
+  const call = new ModelCallRecorder("evidence_review", {
+    runId: path.basename(directory),
+    runStatus: outcome.status,
+  });
   const cached = verdictSchema.safeParse(
     JSON.parse(await fs.readFile(cache, "utf-8").catch(() => "null"))
   );
   if (cached.success) {
+    await call.finish("cached", {
+      reason: "review.json already holds a verdict; no model call",
+      context: { verdict: cached.data.verdict },
+    });
     return cached.data;
   }
+  let requested = false;
+  let response: ReviewResponse | undefined;
   try {
     const selected = await configuredModel();
     if (!selected.ready || !selected.model) {
+      await call.finish("skipped", {
+        reason: "no model is configured and authenticated",
+      });
       return null;
     }
     const specYaml = await fs.readFile(
@@ -98,62 +189,38 @@ export const reviewRunEvidence = async function reviewRunEvidence(
     const manifest = await readEvidenceManifest(directory);
     const failedStep = outcome.failedStep ?? manifest.failedStep;
     const shown = reviewedScreenshots(manifest, specYaml, failedStep);
-    const content: (
-      | { type: "text"; text: string }
-      | { type: "image"; data: string; mimeType: string }
-    )[] = [
+    const content: ReviewContent = [
       {
         type: "text",
-        text: [
-          `spec.yml:\n${specYaml}`,
-          specSource ? `spec.ts:\n${specSource.slice(0, 8000)}` : "",
-          `Result: ${outcome.status}${failedStep ? ` at step "${failedStep}"` : ""}`,
-          outcome.failReason
-            ? `Failure message:\n${outcome.failReason.slice(0, 4000)}`
-            : "",
-          manifest.errorContext
-            ? `Accessibility snapshot at the failure:\n${manifest.errorContext.slice(0, 6000)}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
+        text: reviewText(specYaml, specSource, manifest, outcome, failedStep),
       },
     ];
-    if (
-      await (async () => {
-        const awaitedValue3749 = await getSecuritySettings();
-        return awaitedValue3749.sendScreenshotsToModel;
-      })()
-    ) {
-      for (const step of shown) {
-        if (!isStepScreenshot(step.file)) {
-          continue;
-        }
-        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
-        const bytes = await fs
-          .readFile(path.join(directory, step.file))
-          .catch(() => null);
-        if (!bytes || bytes.byteLength > 4 * 1024 * 1024) {
-          continue;
-        }
-        content.push(
-          { type: "text", text: `Screenshot after step "${step.label}":` },
-          {
-            type: "image",
-            data: bytes.toString("base64"),
-            mimeType: stepScreenshotContentType(step.file),
-          }
-        );
-      }
-    }
+    const { sendScreenshotsToModel: sendScreenshots } =
+      await getSecuritySettings();
+    const images = sendScreenshots
+      ? await attachScreenshots(directory, shown, content)
+      : 0;
     const runtime = await modelRuntimePromise;
-    const response = await runtime.completeSimple(
+    call.sending(selected.model, {
+      maxTokens: REVIEW_MAX_TOKENS,
+      timeoutMs: REVIEW_TIMEOUT_MS,
+      sendScreenshotsToModel: sendScreenshots,
+      imagesAttached: images,
+      textCharacters: content[0].type === "text" ? content[0].text.length : 0,
+      systemPromptCharacters: SYSTEM_PROMPT.length,
+    });
+    requested = true;
+    response = await runtime.completeSimple(
       selected.model,
       {
         systemPrompt: SYSTEM_PROMPT,
         messages: [{ role: "user", content, timestamp: Date.now() }],
       },
-      { maxTokens: 400, signal: AbortSignal.timeout(60_000) }
+      {
+        maxTokens: REVIEW_MAX_TOKENS,
+        signal: AbortSignal.timeout(REVIEW_TIMEOUT_MS),
+        onPayload: call.onPayload,
+      }
     );
     const text = response.content
       .map((part) => (part.type === "text" ? part.text : ""))
@@ -162,12 +229,20 @@ export const reviewRunEvidence = async function reviewRunEvidence(
       JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1))
     );
     await fs.writeFile(cache, JSON.stringify(review));
+    await call.finish("completed", {
+      stopReason: response.stopReason,
+      usage: response.usage,
+      context: { verdict: review.verdict },
+    });
     return review;
   } catch (error) {
-    logger.warn("evidence review failed", {
-      directory,
-      error: error instanceof Error ? error.message : String(error),
+    const reason = error instanceof Error ? error.message : String(error);
+    await call.finish(failedReviewOutcome(response, requested), {
+      reason: (response?.errorMessage ?? reason).slice(0, 500),
+      stopReason: response?.stopReason ?? null,
+      usage: response?.usage,
     });
+    logger.warn("evidence review failed", { directory, error: reason });
     return null;
   }
 };
