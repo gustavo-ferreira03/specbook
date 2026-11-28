@@ -72,6 +72,80 @@ export const reviewNextStep = function reviewNextStep(
 const REVIEW_MAX_TOKENS = 400;
 const REVIEW_TIMEOUT_MS = 60_000;
 
+type ReviewResponse = Awaited<
+  ReturnType<Awaited<typeof modelRuntimePromise>["completeSimple"]>
+>;
+type ReviewContent = (
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string }
+)[];
+
+const reviewText = function reviewText(
+  specYaml: string,
+  specSource: string,
+  manifest: EvidenceManifest,
+  outcome: { status: string; failReason?: string | null },
+  failedStep: string | null | undefined
+): string {
+  return [
+    `spec.yml:\n${specYaml}`,
+    specSource ? `spec.ts:\n${specSource.slice(0, 8000)}` : "",
+    `Result: ${outcome.status}${failedStep ? ` at step "${failedStep}"` : ""}`,
+    outcome.failReason
+      ? `Failure message:\n${outcome.failReason.slice(0, 4000)}`
+      : "",
+    manifest.errorContext
+      ? `Accessibility snapshot at the failure:\n${manifest.errorContext.slice(0, 6000)}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+};
+
+// Appends the step screenshots to the review content and returns how many were attached.
+const attachScreenshots = async function attachScreenshots(
+  directory: string,
+  shown: EvidenceManifest["steps"],
+  content: ReviewContent
+): Promise<number> {
+  let images = 0;
+  for (const step of shown) {
+    if (!isStepScreenshot(step.file)) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
+    const bytes = await fs
+      .readFile(path.join(directory, step.file))
+      .catch(() => null);
+    if (!bytes || bytes.byteLength > 4 * 1024 * 1024) {
+      continue;
+    }
+    content.push(
+      { type: "text", text: `Screenshot after step "${step.label}":` },
+      {
+        type: "image",
+        data: bytes.toString("base64"),
+        mimeType: stepScreenshotContentType(step.file),
+      }
+    );
+    images += 1;
+  }
+  return images;
+};
+
+// A response that arrived but could not be used still consumed tokens; a request that threw reports none.
+const failedReviewOutcome = function failedReviewOutcome(
+  response: ReviewResponse | undefined,
+  requested: boolean
+): "provider_error" | "invalid_response" | "failed" {
+  if (response) {
+    return response.stopReason === "error" || response.stopReason === "aborted"
+      ? "provider_error"
+      : "invalid_response";
+  }
+  return requested ? "provider_error" : "failed";
+};
+
 export const reviewRunEvidence = async function reviewRunEvidence(
   directory: string,
   outcome: {
@@ -96,9 +170,7 @@ export const reviewRunEvidence = async function reviewRunEvidence(
     return cached.data;
   }
   let requested = false;
-  let response:
-    | Awaited<ReturnType<Awaited<typeof modelRuntimePromise>["completeSimple"]>>
-    | undefined;
+  let response: ReviewResponse | undefined;
   try {
     const selected = await configuredModel();
     if (!selected.ready || !selected.model) {
@@ -117,53 +189,17 @@ export const reviewRunEvidence = async function reviewRunEvidence(
     const manifest = await readEvidenceManifest(directory);
     const failedStep = outcome.failedStep ?? manifest.failedStep;
     const shown = reviewedScreenshots(manifest, specYaml, failedStep);
-    const content: (
-      | { type: "text"; text: string }
-      | { type: "image"; data: string; mimeType: string }
-    )[] = [
+    const content: ReviewContent = [
       {
         type: "text",
-        text: [
-          `spec.yml:\n${specYaml}`,
-          specSource ? `spec.ts:\n${specSource.slice(0, 8000)}` : "",
-          `Result: ${outcome.status}${failedStep ? ` at step "${failedStep}"` : ""}`,
-          outcome.failReason
-            ? `Failure message:\n${outcome.failReason.slice(0, 4000)}`
-            : "",
-          manifest.errorContext
-            ? `Accessibility snapshot at the failure:\n${manifest.errorContext.slice(0, 6000)}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
+        text: reviewText(specYaml, specSource, manifest, outcome, failedStep),
       },
     ];
-    const sendScreenshots = (await getSecuritySettings())
-      .sendScreenshotsToModel;
-    let images = 0;
-    if (sendScreenshots) {
-      for (const step of shown) {
-        if (!isStepScreenshot(step.file)) {
-          continue;
-        }
-        // oxlint-disable-next-line no-await-in-loop -- Apply dependent state changes in order and keep resource use bounded.
-        const bytes = await fs
-          .readFile(path.join(directory, step.file))
-          .catch(() => null);
-        if (!bytes || bytes.byteLength > 4 * 1024 * 1024) {
-          continue;
-        }
-        content.push(
-          { type: "text", text: `Screenshot after step "${step.label}":` },
-          {
-            type: "image",
-            data: bytes.toString("base64"),
-            mimeType: stepScreenshotContentType(step.file),
-          }
-        );
-        images += 1;
-      }
-    }
+    const { sendScreenshotsToModel: sendScreenshots } =
+      await getSecuritySettings();
+    const images = sendScreenshots
+      ? await attachScreenshots(directory, shown, content)
+      : 0;
     const runtime = await modelRuntimePromise;
     call.sending(selected.model, {
       maxTokens: REVIEW_MAX_TOKENS,
@@ -201,21 +237,11 @@ export const reviewRunEvidence = async function reviewRunEvidence(
     return review;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    // A response that arrived but could not be used still consumed tokens; a request that threw reports none.
-    await call.finish(
-      response
-        ? response.stopReason === "error" || response.stopReason === "aborted"
-          ? "provider_error"
-          : "invalid_response"
-        : requested
-          ? "provider_error"
-          : "failed",
-      {
-        reason: (response?.errorMessage ?? reason).slice(0, 500),
-        stopReason: response?.stopReason ?? null,
-        usage: response?.usage,
-      }
-    );
+    await call.finish(failedReviewOutcome(response, requested), {
+      reason: (response?.errorMessage ?? reason).slice(0, 500),
+      stopReason: response?.stopReason ?? null,
+      usage: response?.usage,
+    });
     logger.warn("evidence review failed", { directory, error: reason });
     return null;
   }

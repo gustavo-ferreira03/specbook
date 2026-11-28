@@ -8,9 +8,11 @@ import {
   describeModel,
   reportedUsage,
   summarizePayload,
-  type ModelDescription,
-  type PayloadSummary,
-  type ReportedUsage,
+} from "../llm/call-log";
+import type {
+  ModelDescription,
+  PayloadSummary,
+  ReportedUsage,
 } from "../llm/call-log";
 import { withFileQueue } from "../operations/file-queue";
 import { storageRoot } from "../paths";
@@ -158,12 +160,15 @@ export class TurnMetricsRecorder {
     stopReason?: string;
   }): void {
     this.record.assistantMessages += 1;
-    const usage = message.usage;
+    const { usage } = message;
     const seen = reportedUsage(usage);
     const { usageReported } = this.record;
     usageReported.assistantMessages += 1;
-    if (seen) usageReported.withUsage += 1;
-    else usageReported.withoutUsage += 1;
+    if (seen) {
+      usageReported.withUsage += 1;
+    } else {
+      usageReported.withoutUsage += 1;
+    }
     if (seen) {
       for (const field of [
         "input",
@@ -173,10 +178,13 @@ export class TurnMetricsRecorder {
         "reasoning",
         "totalTokens",
       ] as const) {
-        if (seen[field] !== null) usageReported.fields[field] += 1;
+        if (seen[field] !== null) {
+          usageReported.fields[field] += 1;
+        }
       }
-      if (seen.cost && seen.cost.total !== null)
+      if (seen.cost && seen.cost.total !== null) {
         usageReported.fields.costTotal += 1;
+      }
     }
     this.record.modelCalls.push({
       endedAt: new Date().toISOString(),

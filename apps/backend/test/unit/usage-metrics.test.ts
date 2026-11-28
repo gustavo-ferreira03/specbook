@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, test } from "node:test";
 
+import type { ChatTurnMetrics } from "../../src/core/chat/metrics";
+import type { ModelCallRecord } from "../../src/core/llm/call-log";
 import { useTempStorage } from "../helpers/storage";
 
 const storage = useTempStorage();
@@ -11,13 +13,35 @@ const { describeModel, modelCallsPath, reportedUsage, summarizePayload } =
 const { TurnMetricsRecorder, chatTurnMetricsPath } =
   await import("../../src/core/chat/metrics");
 
-async function readLines(file: string): Promise<Record<string, any>[]> {
-  const text = await fs.readFile(file, "utf8").catch(() => "");
+const readLines = async function readLines<T>(file: string): Promise<T[]> {
+  const text = await fs.readFile(file, "utf-8").catch(() => "");
   return text
     .split("\n")
     .filter(Boolean)
-    .map((line) => JSON.parse(line));
-}
+    .map((line) => JSON.parse(line) as T);
+};
+
+const runDirectory = async function runDirectory(
+  name: string
+): Promise<string> {
+  const directory = path.join(storage, "runs", name);
+  await fs.mkdir(directory, { recursive: true });
+  await fs.writeFile(
+    path.join(directory, "spec.yml"),
+    "title: Example\ndescription: Example.\npreconditions: []\nsteps:\n  - Open the page\nexpectedResult: The page is shown.\npostconditions: []\n"
+  );
+  await fs.writeFile(path.join(directory, "spec.ts"), "// test source\n");
+  return directory;
+};
+
+const reviewCalls = async function reviewCalls(
+  runId: string
+): Promise<ModelCallRecord[]> {
+  const calls = await readLines<ModelCallRecord>(modelCallsPath);
+  return calls.filter(
+    (line) => line.purpose === "evidence_review" && line.context.runId === runId
+  );
+};
 
 describe("usage reporting", () => {
   test("keeps a field the provider did not report apart from zero", () => {
@@ -93,7 +117,7 @@ describe("usage reporting", () => {
     assert.ok(summary.keys.includes("system"));
     assert.doesNotMatch(
       JSON.stringify(summary),
-      /private|secret system prompt|someone|aaaa/
+      /private|secret system prompt|someone|aaaa/u
     );
     assert.equal(summarizePayload("not an object"), null);
   });
@@ -172,9 +196,8 @@ describe("usage reporting", () => {
       usage: { input: 3, output: 1 },
     });
     await recorder.finish();
-    const record = (await readLines(chatTurnMetricsPath)).find(
-      (line) => line.chatId === "chat-usage"
-    );
+    const records = await readLines<ChatTurnMetrics>(chatTurnMetricsPath);
+    const record = records.find((line) => line.chatId === "chat-usage");
     assert.ok(record);
     assert.deepEqual(record.tokens, {
       input: 13,
@@ -200,34 +223,16 @@ describe("usage reporting", () => {
     });
     assert.equal(record.modelCalls.length, 3);
     assert.equal(record.modelCalls[1].usage, null);
-    assert.equal(record.modelCalls[2].usage.totalTokens, null);
-    assert.equal(record.modelInfo.id, "m");
+    assert.equal(record.modelCalls[2].usage?.totalTokens, null);
+    assert.equal(record.modelInfo?.id, "m");
     assert.equal(record.thinkingLevel, "medium");
     assert.equal(record.sendScreenshotsToModel, true);
     assert.equal(record.providerRequests, 2);
-    assert.equal(record.firstProviderRequest.parameters.max_tokens, 10);
+    assert.equal(record.firstProviderRequest?.parameters.max_tokens, 10);
   });
 });
 
 describe("evidence review usage", () => {
-  async function runDirectory(name: string): Promise<string> {
-    const directory = path.join(storage, "runs", name);
-    await fs.mkdir(directory, { recursive: true });
-    await fs.writeFile(
-      path.join(directory, "spec.yml"),
-      "title: Example\ndescription: Example.\npreconditions: []\nsteps:\n  - Open the page\nexpectedResult: The page is shown.\npostconditions: []\n"
-    );
-    await fs.writeFile(path.join(directory, "spec.ts"), "// test source\n");
-    return directory;
-  }
-
-  async function reviewCalls(runId: string): Promise<Record<string, any>[]> {
-    return (await readLines(modelCallsPath)).filter(
-      (line) =>
-        line.purpose === "evidence_review" && line.context.runId === runId
-    );
-  }
-
   test("records skipped, completed, cached, unusable and failed reviews without inventing usage", async (t) => {
     const { runMigrations } = await import("../../src/infra/db/migrate");
     await runMigrations();
@@ -247,7 +252,7 @@ describe("evidence review usage", () => {
 
     const registry = await modelRegistryPromise;
     const runtime = await modelRuntimePromise;
-    const model = registry.getAll()[0];
+    const [model] = registry.getAll();
     assert.ok(model);
     await settingsRepository.updateLlmSettings({
       provider: model.provider,
@@ -292,7 +297,7 @@ describe("evidence review usage", () => {
     t.mock.method(
       runtime,
       "completeSimple",
-      async (
+      (
         _model: unknown,
         _context: unknown,
         options: {
@@ -306,7 +311,9 @@ describe("evidence review usage", () => {
           max_tokens: 400,
           messages: [{ role: "user", content: "x" }],
         });
-        return replies.shift()!();
+        const reply = replies.shift();
+        assert.ok(reply);
+        return Promise.resolve().then(reply);
       }
     );
     try {
@@ -321,13 +328,13 @@ describe("evidence review usage", () => {
       );
       const [first, second] = await reviewCalls("review-completed");
       assert.equal(first.outcome, "completed");
-      assert.equal(first.usage.totalTokens, 940);
-      assert.equal(first.usage.cost.total, 0.013);
-      assert.equal(first.usage.reasoning, null);
-      assert.equal(first.model.id, model.id);
-      assert.equal(first.request.maxTokens, 400);
-      assert.equal(first.request.imagesAttached, 0);
-      assert.equal(first.payload.parameters.max_tokens, 400);
+      assert.equal(first.usage?.totalTokens, 940);
+      assert.equal(first.usage?.cost?.total, 0.013);
+      assert.equal(first.usage?.reasoning, null);
+      assert.equal(first.model?.id, model.id);
+      assert.equal(first.request?.maxTokens, 400);
+      assert.equal(first.request?.imagesAttached, 0);
+      assert.equal(first.payload?.parameters.max_tokens, 400);
       assert.equal(first.context.verdict, "matches");
       assert.equal(second.outcome, "cached");
       assert.equal(second.usage, null);
@@ -339,7 +346,7 @@ describe("evidence review usage", () => {
       );
       const [unusableCall] = await reviewCalls("review-unusable");
       assert.equal(unusableCall.outcome, "invalid_response");
-      assert.equal(unusableCall.usage.totalTokens, 940);
+      assert.equal(unusableCall.usage?.totalTokens, 940);
 
       const errored = await runDirectory("review-errored");
       assert.equal(
@@ -358,7 +365,7 @@ describe("evidence review usage", () => {
       assert.equal(await reviewRunEvidence(thrown, { status: "failed" }), null);
       const [thrownCall] = await reviewCalls("review-thrown");
       assert.equal(thrownCall.outcome, "provider_error");
-      assert.match(thrownCall.reason, /network down/);
+      assert.match(thrownCall.reason ?? "", /network down/u);
       assert.equal(thrownCall.usage, null);
     } finally {
       await settingsRepository.updateLlmSettings({ provider: "", model: "" });

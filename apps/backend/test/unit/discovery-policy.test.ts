@@ -265,15 +265,15 @@ describe("discovery browser policy", () => {
     assert.equal(snapshotClickTarget(snapshot, "e39"), "link Criar conta");
     assert.throws(
       () => snapshotClickTarget(snapshot, "f2e39"),
-      /missing or ambiguous/
+      /missing or ambiguous/u
     );
     assert.throws(
       () => snapshotClickTarget(snapshot, "Entrar"),
-      /fresh browser snapshot/
+      /fresh browser snapshot/u
     );
     assert.throws(
       () => snapshotClickTarget(snapshot, "f1e39]"),
-      /fresh browser snapshot/
+      /fresh browser snapshot/u
     );
   });
 

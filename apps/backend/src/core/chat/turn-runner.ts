@@ -483,10 +483,10 @@ const runReservedChatTurn = async function runReservedChatTurn(
       sessionManager,
       settingsManager: await agentSettings(),
     });
+    const { sendScreenshotsToModel } = await getSecuritySettings();
     metrics.setModel(model, {
       thinkingLevel: session.thinkingLevel,
-      sendScreenshotsToModel: (await getSecuritySettings())
-        .sendScreenshotsToModel,
+      sendScreenshotsToModel,
     });
     const active: ActiveChatSession = {
       session,

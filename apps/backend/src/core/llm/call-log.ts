@@ -75,13 +75,17 @@ export interface PayloadSummary {
   imageCount: number;
 }
 
-function reported(value: unknown): number | null {
+const reported = function reported(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
+};
 
 // Keeps "not reported" apart from zero: a missing field stays null.
-export function reportedUsage(usage: unknown): ReportedUsage | null {
-  if (!usage || typeof usage !== "object") return null;
+export const reportedUsage = function reportedUsage(
+  usage: unknown
+): ReportedUsage | null {
+  if (!usage || typeof usage !== "object") {
+    return null;
+  }
   const value = usage as Record<string, unknown>;
   const cost =
     value.cost && typeof value.cost === "object"
@@ -104,13 +108,18 @@ export function reportedUsage(usage: unknown): ReportedUsage | null {
         }
       : null,
   };
-}
+};
 
-export function describeModel(model: unknown): ModelDescription | null {
-  if (!model || typeof model !== "object") return null;
-  const value = model as Record<string, unknown>;
-  if (typeof value.provider !== "string" || typeof value.id !== "string")
+export const describeModel = function describeModel(
+  model: unknown
+): ModelDescription | null {
+  if (!model || typeof model !== "object") {
     return null;
+  }
+  const value = model as Record<string, unknown>;
+  if (typeof value.provider !== "string" || typeof value.id !== "string") {
+    return null;
+  }
   return {
     provider: value.provider,
     id: value.id,
@@ -121,7 +130,7 @@ export function describeModel(model: unknown): ModelDescription | null {
     maxTokens: reported(value.maxTokens),
     costRates: value.cost ?? null,
   };
-}
+};
 
 // Conversation content, prompts, tool schemas and identifiers stay out of the log.
 const CONTENT_KEYS = new Set([
@@ -140,16 +149,19 @@ const CONTENT_KEYS = new Set([
   "safety_identifier",
 ]);
 
-function countImages(value: unknown, depth = 0): number {
-  if (depth > 6 || !value || typeof value !== "object") return 0;
-  if (Array.isArray(value))
+const countImages = function countImages(value: unknown, depth = 0): number {
+  if (depth > 6 || !value || typeof value !== "object") {
+    return 0;
+  }
+  if (Array.isArray(value)) {
     return value.reduce<number>(
       (total, item) => total + countImages(item, depth + 1),
       0
     );
+  }
   const record = value as Record<string, unknown>;
   const own =
-    typeof record.type === "string" && /image/.test(record.type) ? 1 : 0;
+    typeof record.type === "string" && /image/u.test(record.type) ? 1 : 0;
   return (
     own +
     Object.values(record).reduce<number>(
@@ -157,53 +169,72 @@ function countImages(value: unknown, depth = 0): number {
       0
     )
   );
-}
+};
+
+// The array that holds the conversation, whichever key the provider adapter uses for it.
+const conversationOf = function conversationOf(
+  record: Record<string, unknown>
+): unknown[] | null {
+  if (Array.isArray(record.messages)) {
+    return record.messages;
+  }
+  if (Array.isArray(record.input)) {
+    return record.input;
+  }
+  if (Array.isArray(record.contents)) {
+    return record.contents;
+  }
+  return null;
+};
 
 // The request body as the provider adapter built it, reduced to its generation parameters.
-export function summarizePayload(payload: unknown): PayloadSummary | null {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+export const summarizePayload = function summarizePayload(
+  payload: unknown
+): PayloadSummary | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return null;
+  }
   const record = payload as Record<string, unknown>;
   const parameters: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(record)) {
-    if (CONTENT_KEYS.has(key)) continue;
+    if (CONTENT_KEYS.has(key)) {
+      continue;
+    }
     if (
       value === null ||
       ["string", "number", "boolean"].includes(typeof value)
-    )
+    ) {
       parameters[key] = value;
-    else if (typeof value === "object" && JSON.stringify(value).length <= 400)
+    } else if (
+      typeof value === "object" &&
+      JSON.stringify(value).length <= 400
+    ) {
       parameters[key] = value;
+    }
   }
-  const conversation = Array.isArray(record.messages)
-    ? record.messages
-    : Array.isArray(record.input)
-      ? record.input
-      : Array.isArray(record.contents)
-        ? record.contents
-        : null;
+  const conversation = conversationOf(record);
   return {
-    keys: Object.keys(record).sort(),
+    keys: Object.keys(record).toSorted(),
     parameters,
     messageCount: conversation ? conversation.length : null,
     toolCount: Array.isArray(record.tools) ? record.tools.length : null,
     imageCount: countImages(conversation),
   };
-}
+};
 
-export async function appendMetricsRecord(
+export const appendMetricsRecord = async function appendMetricsRecord(
   filePath: string,
   record: unknown
 ): Promise<void> {
   try {
     await withFileQueue(filePath, async () => {
       await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.appendFile(filePath, `${JSON.stringify(record)}\n`, "utf8");
+      await fs.appendFile(filePath, `${JSON.stringify(record)}\n`, "utf-8");
     });
   } catch (error) {
     console.error(`Failed to write ${path.basename(filePath)}:`, error);
   }
-}
+};
 
 export class ModelCallRecorder {
   private readonly started = Date.now();
@@ -212,14 +243,20 @@ export class ModelCallRecorder {
   private request: Record<string, unknown> | null = null;
   private written = false;
 
+  private readonly purpose: ModelCallPurpose;
+
+  private readonly context: Record<string, unknown>;
+
   constructor(
-    private readonly purpose: ModelCallPurpose,
-    private readonly context: Record<string, unknown> = {}
-  ) {}
+    purpose: ModelCallPurpose,
+    context: Record<string, unknown> = {}
+  ) {
+    this.purpose = purpose;
+    this.context = context;
+  }
 
   readonly onPayload = (payload: unknown): undefined => {
     this.payload = summarizePayload(payload);
-    return undefined;
   };
 
   sending(model: unknown, request: Record<string, unknown>): void {
@@ -236,7 +273,9 @@ export class ModelCallRecorder {
       context?: Record<string, unknown>;
     } = {}
   ): Promise<void> {
-    if (this.written) return;
+    if (this.written) {
+      return;
+    }
     this.written = true;
     const record: ModelCallRecord = {
       schemaVersion: 1,
