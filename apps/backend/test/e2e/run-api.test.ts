@@ -5397,7 +5397,7 @@ describe("autonomous pause and decisions", () => {
     const { createJobPolicy } = await import("../../src/core/jobs/policy");
     const { settingsRepository } =
       await import("../../src/infra/repositories/settings");
-    const { Type } = await import("@earendil-works/pi-ai");
+    const { Type } = await import("typebox");
     const { z } = await import("zod");
     /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const scope of ["project", "global"]) {

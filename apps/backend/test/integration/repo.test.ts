@@ -1528,7 +1528,7 @@ describe("autonomous job proposals", () => {
       await import("../../src/infra/repositories/jobs");
     const { createJobPolicy } = await import("../../src/core/jobs/policy");
     const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
-    const { Type } = await import("@earendil-works/pi-ai");
+    const { Type } = await import("typebox");
     const projectId = await createProject("Requested job permissions");
     /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const [trigger, scope, direct] of [
@@ -1579,7 +1579,7 @@ describe("autonomous job proposals", () => {
       await import("../../src/infra/repositories/jobs");
     const { createJobPolicy } = await import("../../src/core/jobs/policy");
     const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
-    const { Type } = await import("@earendil-works/pi-ai");
+    const { Type } = await import("typebox");
     const projectId = await createProject("Typed job policy");
     /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const [kind, name, message] of [
@@ -2024,7 +2024,7 @@ describe("autonomous job proposals", () => {
     const job = requireValue(await jobsRepository.claim(row.id));
     let executed = 0;
     let aborted = false;
-    const { Type } = await import("@earendil-works/pi-ai");
+    const { Type } = await import("typebox");
     const tools = createJobPolicy(job, () => {
       aborted = true;
     }).tools([
@@ -2273,7 +2273,7 @@ describe("autonomous job proposals", () => {
     const { createJobPolicy } = await import("../../src/core/jobs/policy");
     const { jobLimitsSchema } = await import("../../src/core/jobs/schemas");
     const { bridgeBrowserTools } = await import("../../src/core/browser/mcp");
-    const { Type } = await import("@earendil-works/pi-ai");
+    const { Type } = await import("typebox");
     const projectId = await createProject("Browser infrastructure retry");
     /* oxlint-disable no-await-in-loop -- Run this stateful scenario in order; each step relies on the previous result. */
     for (const name of ["browser_navigate", "resume_session"]) {

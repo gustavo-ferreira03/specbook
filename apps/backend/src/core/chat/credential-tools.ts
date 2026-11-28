@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { SECRET_NAME_PATTERN } from "@specbook/runtime/specbook/guard";
+import { Type } from "typebox";
 import { z } from "zod";
 
 import type { RunEnvironment } from "../../infra/db/schema";

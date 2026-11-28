@@ -1,8 +1,8 @@
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { errorCodeOf, isInfrastructureCode } from "@specbook/runtime/errors";
 import type { ErrorCode } from "@specbook/runtime/errors";
+import { Type } from "typebox";
 import { z } from "zod";
 
 import type { RunEnvironment } from "../../infra/db/schema";

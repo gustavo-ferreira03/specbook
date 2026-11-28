@@ -1,10 +1,10 @@
 import path from "node:path";
 
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { readEvidenceManifest } from "@specbook/runtime/evidence";
 import { analyzeSpecSource, stepTitlesError } from "@specbook/runtime/validate";
 import { parseSpecYaml } from "@specbook/runtime/yaml";
+import { Type } from "typebox";
 import { z } from "zod";
 
 import type { HumanSpec, RunEnvironment } from "../../infra/db/schema";

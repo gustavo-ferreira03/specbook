@@ -1,5 +1,5 @@
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { z } from "zod";
 
 import type { ProjectContext, RunEnvironment } from "../../infra/db/schema";

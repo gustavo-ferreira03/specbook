@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -10,6 +9,7 @@ import { CodedError, errorCodeOf } from "@specbook/runtime/errors";
 import type { ErrorCode } from "@specbook/runtime/errors";
 import { SPEC_VIEWPORT } from "@specbook/runtime/playwright";
 import { minimalChildEnv } from "@specbook/runtime/process";
+import { Type } from "typebox";
 
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from "./vnc";
 

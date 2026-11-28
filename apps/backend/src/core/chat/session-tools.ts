@@ -2,10 +2,10 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { CodedError, errorCodeOf } from "@specbook/runtime/errors";
 import type { ErrorCode } from "@specbook/runtime/errors";
+import { Type } from "typebox";
 import { z } from "zod";
 
 import type { RunEnvironment } from "../../infra/db/schema";

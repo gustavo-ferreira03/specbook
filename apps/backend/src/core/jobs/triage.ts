@@ -1,13 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import {
   readEvidenceManifest,
   isStepScreenshot,
   stepScreenshotContentType,
 } from "@specbook/runtime/evidence";
+import { Type } from "typebox";
 import { z } from "zod";
 
 import { jobsRepository } from "../../infra/repositories/jobs";
